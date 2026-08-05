@@ -6,5 +6,8 @@ google-auth-httplib2
 google-auth-oauthlib
 pydantic
 python-dotenv
+langchain
+langchain-core
+langchain-community
 langchain-google-genai
 apscheduler
