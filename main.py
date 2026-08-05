@@ -1,210 +1,198 @@
 import os
-import logging
-from contextlib import asynccontextmanager
-from typing import Optional
-
+import datetime
+import asyncio
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from fastapi import FastAPI, Request
+import requests
 
-from parser import parse_schedule_message
-from calendar_service import (
-    create_google_calendar_event,
-    check_calendar_conflict,
-    find_event_by_title,
-    delete_google_calendar_event,
-    reschedule_google_calendar_event,
-    list_google_calendar_events,
-)
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.agents import initialize_agent, AgentType
+from langchain.tools import Tool
 
 load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Initialize Telegram Application
-bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build() if TELEGRAM_TOKEN else None
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Saved after first user message
 
+app = FastAPI()
+scheduler = AsyncIOScheduler()
 
-# --- Telegram Command Handlers ---
-async def start_command(update: Update, context):
-    await update.message.reply_text(
-        "👋 Hi! I'm your AI Calendar Assistant via FastAPI.\n\n"
-        "I can help you with:\n"
-        "👉 **Create:** 'Team sync tomorrow at 3pm'\n"
-        "👉 **List:** 'What is my schedule for tomorrow?'\n"
-        "👉 **Reschedule:** 'Move team sync tomorrow to 5pm'\n"
-        "👉 **Delete:** 'Cancel team sync tomorrow'\n"
-    )
+# Initialize Google Calendar Service
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+calendar_service = build('calendar', 'v3', credentials=creds)
 
 
-async def telegram_message_handler(update: Update, context):
-    if not update.message or not update.message.text:
-        return
+# ---------------------------------------------------------
+# 📅 GOOGLE CALENDAR TOOLS & CONFLICT DETECTION
+# ---------------------------------------------------------
 
-    user_text = update.message.text
-    await update.message.reply_text("⏳ Processing calendar request...")
+def list_events(query: str = "") -> str:
+    """Lists events for today or upcoming days."""
+    now = datetime.datetime.utcnow().isoformat() + 'Z'
+    events_result = calendar_service.events().list(
+        calendarId='primary', timeMin=now,
+        maxResults=10, singleEvents=True, orderBy='startTime'
+    ).execute()
+    events = events_result.get('items', [])
+    
+    if not events:
+        return "No upcoming events found."
+    
+    output = []
+    for event in events:
+        start = event['start'].get('dateTime', event['start'].get('date'))
+        output.append(f"ID: {event['id']} | Summary: {event.get('summary')} | Start: {start}")
+    return "\n".join(output)
 
+
+def create_event(details: str) -> str:
+    """
+    Creates an event with conflict detection.
+    Expects input format: 'Summary | StartISO | EndISO'
+    Example: 'Team Sync | 2026-08-06T10:00:00Z | 2026-08-06T11:00:00Z'
+    """
     try:
-        parsed_data = parse_schedule_message(user_text)
-        reply_lines = []
-
-        for event in parsed_data.events:
-            action = getattr(event, 'action', 'CREATE').upper()
-
-            # --- LIST ACTION ---
-            if action == "LIST":
-                events = list_google_calendar_events(event.start_time, event.end_time)
-                if events:
-                    reply_lines.append("📅 **Your Schedule:**\n")
-                    for ev in events:
-                        reply_lines.append(f"• **{ev['summary']}** ({ev['start']} to {ev['end']})")
-                else:
-                    reply_lines.append("📋 No events found for this time period.")
-
-            # --- DELETE ACTION ---
-            elif action == "DELETE":
-                target = find_event_by_title(event.event_name, time_min_iso=event.start_time)
-                if target and delete_google_calendar_event(target['id']):
-                    reply_lines.append(f"🗑️ **Deleted:** '{target.get('summary')}'")
-                else:
-                    reply_lines.append(f"❌ Could not find event matching '{event.event_name}' to delete.")
-
-            # --- RESCHEDULE ACTION ---
-            elif action == "RESCHEDULE":
-                target = find_event_by_title(event.event_name, time_min_iso=event.start_time)
-                if target:
-                    link = reschedule_google_calendar_event(target['id'], event.start_time, event.end_time)
-                    reply_lines.append(
-                        f"🔄 **Rescheduled:** '{target.get('summary')}'\n"
-                        f"⏰ {event.start_time} - {event.end_time}\n"
-                        f"🔗 [View in Google Calendar]({link})\n"
-                    )
-                else:
-                    reply_lines.append(f"❌ Could not find event matching '{event.event_name}' to reschedule.")
-
-            # --- CREATE ACTION ---
-            else:
-                conflicts = check_calendar_conflict(event.start_time, event.end_time)
-                if conflicts:
-                    reply_lines.append(f"⚠️ **Conflict Detected:** Overlaps with {', '.join(conflicts)}.\n")
-
-                link = create_google_calendar_event(event)
-                reply_lines.append(
-                    f"✅ **Created:** {event.event_name}\n"
-                    f"⏰ {event.start_time} - {event.end_time}\n"
-                    f"🔗 [View in Google Calendar]({link})\n"
-                )
-
-        await update.message.reply_markdown('\n'.join(reply_lines))
-
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-
-# --- Register Telegram Handlers ---
-if bot_app:
-    bot_app.add_handler(CommandHandler("start", start_command))
-    bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), telegram_message_handler))
-
-
-# --- FastAPI Lifespan (Starts & Stops Telegram Bot) ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    if bot_app:
-        await bot_app.initialize()
-        await bot_app.start()
-        await bot_app.updater.start_polling()  # <--- Added start_polling
-        print("🤖 Telegram Bot Polling Started!")
-    yield
-    if bot_app:
-        await bot_app.updater.stop()           # <--- Added updater stop
-        await bot_app.stop()
-        await bot_app.shutdown()
-
-
-app = FastAPI(lifespan=lifespan)
-
-
-# --- Endpoint 1: Standard API Webhook (for PowerShell, Slack, or web apps) ---
-class WebhookPayload(BaseModel):
-    source: str
-    sender_id: str
-    message: str
-    timezone: Optional[str] = "Asia/Kolkata"
-
-
-@app.post("/webhook/json")
-async def handle_json_webhook(payload: WebhookPayload):
-    try:
-        parsed_data = parse_schedule_message(payload.message, payload.timezone)
-        results = []
-
-        for event in parsed_data.events:
-            action = getattr(event, "action", "CREATE").upper()
-
-            if action == "LIST":
-                events = list_google_calendar_events(event.start_time, event.end_time)
-                results.append({
-                    "action": "LIST",
-                    "total_events": len(events),
-                    "events": events
-                })
-
-            elif action == "DELETE":
-                target = find_event_by_title(event.event_name, time_min_iso=event.start_time)
-                deleted = delete_google_calendar_event(target['id']) if target else False
-                results.append({
-                    "action": "DELETE",
-                    "event_name": event.event_name,
-                    "status": "success" if deleted else "not_found"
-                })
-
-            elif action == "RESCHEDULE":
-                target = find_event_by_title(event.event_name, time_min_iso=event.start_time)
-                if target:
-                    link = reschedule_google_calendar_event(target['id'], event.start_time, event.end_time)
-                    results.append({
-                        "action": "RESCHEDULE",
-                        "event_name": target.get('summary'),
-                        "start_time": event.start_time,
-                        "end_time": event.end_time,
-                        "google_calendar_link": link
-                    })
-                else:
-                    results.append({
-                        "action": "RESCHEDULE",
-                        "event_name": event.event_name,
-                        "status": "not_found"
-                    })
-
-            else:
-                link = create_google_calendar_event(event)
-                results.append({
-                    "action": "CREATE",
-                    "event_name": event.event_name,
-                    "start_time": event.start_time,
-                    "end_time": event.end_time,
-                    "google_calendar_link": link,
-                })
-
-        return {
-            "status": "success",
-            "raw_message": payload.message,
-            "total_operations": len(results),
-            "results": results,
+        parts = [p.strip() for p in details.split('|')]
+        summary, start_time, end_time = parts[0], parts[1], parts[2]
+        
+        # Conflict Detection Check
+        existing_events = calendar_service.events().list(
+            calendarId='primary',
+            timeMin=start_time,
+            timeMax=end_time,
+            singleEvents=True
+        ).execute().get('items', [])
+        
+        if existing_events:
+            conflicts = ", ".join([e.get('summary', 'Event') for e in existing_events])
+            return f"⚠️ CONFLICT DETECTED! You already have these event(s) at this time: {conflicts}. Ask the user if they still want to proceed or reschedule."
+        
+        event_body = {
+            'summary': summary,
+            'start': {'dateTime': start_time},
+            'end': {'dateTime': end_time},
         }
+        created = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
+        return f"✅ Event created successfully: '{created.get('summary')}' at {start_time}"
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return f"Error creating event: {str(e)}"
 
 
-# --- Endpoint 2: Telegram Webhook (Processes updates forwarded from Telegram) ---
+def delete_event(event_id: str) -> str:
+    """Deletes an event given its Event ID."""
+    try:
+        calendar_service.events().delete(calendarId='primary', eventId=event_id.strip()).execute()
+        return f"🗑️ Event '{event_id}' deleted successfully."
+    except Exception as e:
+        return f"Error deleting event: {str(e)}"
+
+
+def update_event(details: str) -> str:
+    """
+    Updates an event time or summary.
+    Expects input format: 'EventID | NewSummary | NewStartISO | NewEndISO'
+    """
+    try:
+        parts = [p.strip() for p in details.split('|')]
+        event_id, summary, start_time, end_time = parts[0], parts[1], parts[2], parts[3]
+        
+        event = calendar_service.events().get(calendarId='primary', eventId=event_id).execute()
+        event['summary'] = summary
+        event['start'] = {'dateTime': start_time}
+        event['end'] = {'dateTime': end_time}
+        
+        updated = calendar_service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
+        return f"✏️ Event updated: '{updated.get('summary')}' is now at {start_time}"
+    except Exception as e:
+        return f"Error updating event: {str(e)}"
+
+
+# LangChain Agent Setup
+tools = [
+    Tool(name="ListEvents", func=list_events, description="Lists upcoming calendar events."),
+    Tool(name="CreateEvent", func=create_event, description="Creates a new event. Format: 'Summary | StartISO | EndISO'"),
+    Tool(name="DeleteEvent", func=delete_event, description="Deletes an event using its Event ID."),
+    Tool(name="UpdateEvent", func=update_event, description="Updates an event. Format: 'EventID | Summary | StartISO | EndISO'")
+]
+
+llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GEMINI_API_KEY)
+agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+
+
+# ---------------------------------------------------------
+# ⏰ BACKGROUND SCHEDULER (REMINDERS & DAILY BRIEFINGS)
+# ---------------------------------------------------------
+
+def send_telegram_message(chat_id: str, text: str):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    requests.post(url, json={"chat_id": chat_id, "text": text})
+
+
+async def check_upcoming_reminders():
+    """Checks for events starting in the next 15 minutes and sends an alert."""
+    if not TELEGRAM_CHAT_ID:
+        return
+    
+    now = datetime.datetime.utcnow()
+    in_15_mins = now + datetime.timedelta(minutes=15)
+    
+    events_result = calendar_service.events().list(
+        calendarId='primary',
+        timeMin=now.isoformat() + 'Z',
+        timeMax=in_15_mins.isoformat() + 'Z',
+        singleEvents=True
+    ).execute()
+    
+    for event in events_result.get('items', []):
+        # Send reminder alert
+        summary = event.get('summary', 'Upcoming Event')
+        start = event['start'].get('dateTime', 'soon')
+        send_telegram_message(TELEGRAM_CHAT_ID, f"⏰ REMINDER: '{summary}' starts in 15 minutes ({start})!")
+
+
+async def send_daily_briefing():
+    """Sends a morning schedule summary at 8:00 AM."""
+    if not TELEGRAM_CHAT_ID:
+        return
+    
+    events_summary = list_events()
+    briefing_text = f"🌅 Good morning! Here is your agenda for today:\n\n{events_summary}"
+    send_telegram_message(TELEGRAM_CHAT_ID, briefing_text)
+
+
+@app.on_event("startup")
+def start_background_jobs():
+    # Check for event reminders every 5 minutes
+    scheduler.add_job(check_upcoming_reminders, 'interval', minutes=5)
+    # Daily morning briefing at 08:00 AM
+    scheduler.add_job(send_daily_briefing, 'cron', hour=8, minute=0)
+    scheduler.start()
+
+
+# ---------------------------------------------------------
+# 💬 TELEGRAM WEBHOOK ROUTE
+# ---------------------------------------------------------
+
 @app.post("/webhook/telegram")
-async def handle_telegram_webhook(request: Request):
-    if not bot_app:
-        raise HTTPException(status_code=500, detail="Telegram bot token not configured")
-
-    req_json = await request.json()
-    update = Update.de_json(req_json, bot_app.bot)
-    await bot_app.process_update(update)
+async def telegram_webhook(request: Request):
+    global TELEGRAM_CHAT_ID
+    data = await request.json()
+    
+    if "message" in data and "text" in data["message"]:
+        chat_id = str(data["message"]["chat"]["id"])
+        user_text = data["message"]["text"]
+        TELEGRAM_CHAT_ID = chat_id  # Save chat ID for background notifications
+        
+        # Process message with Gemini Agent
+        response = agent.run(user_text)
+        
+        # Reply back to Telegram
+        send_telegram_message(chat_id, response)
+        
     return {"status": "ok"}

@@ -7,3 +7,4 @@ google-auth-oauthlib
 pydantic
 python-dotenv
 langchain-google-genai
+apscheduler
