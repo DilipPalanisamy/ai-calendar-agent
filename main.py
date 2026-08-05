@@ -10,8 +10,18 @@ from googleapiclient.discovery import build
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import initialize_agent, AgentType
 from langchain.tools import Tool
+
+try:
+    from langchain import hub
+except ImportError:  # pragma: no cover - compatibility fallback
+    hub = None
+
+try:
+    from langchain.agents import create_react_agent, AgentExecutor
+except ImportError:  # pragma: no cover - compatibility fallback
+    create_react_agent = None
+    AgentExecutor = None
 
 load_dotenv()
 
@@ -24,8 +34,13 @@ scheduler = AsyncIOScheduler()
 
 # Initialize Google Calendar Service
 SCOPES = ['https://www.googleapis.com/auth/calendar']
-creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-calendar_service = build('calendar', 'v3', credentials=creds)
+try:
+    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    calendar_service = build('calendar', 'v3', credentials=creds)
+    CALENDAR_INIT_ERROR = None
+except Exception as exc:  # pragma: no cover - runtime fallback
+    calendar_service = None
+    CALENDAR_INIT_ERROR = str(exc)
 
 
 # ---------------------------------------------------------
@@ -34,6 +49,9 @@ calendar_service = build('calendar', 'v3', credentials=creds)
 
 def list_events(query: str = "") -> str:
     """Lists events for today or upcoming days."""
+    if calendar_service is None:
+        return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
+
     now = datetime.datetime.utcnow().isoformat() + 'Z'
     events_result = calendar_service.events().list(
         calendarId='primary', timeMin=now,
@@ -57,6 +75,9 @@ def create_event(details: str) -> str:
     Expects input format: 'Summary | StartISO | EndISO'
     Example: 'Team Sync | 2026-08-06T10:00:00Z | 2026-08-06T11:00:00Z'
     """
+    if calendar_service is None:
+        return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
+
     try:
         parts = [p.strip() for p in details.split('|')]
         summary, start_time, end_time = parts[0], parts[1], parts[2]
@@ -86,6 +107,9 @@ def create_event(details: str) -> str:
 
 def delete_event(event_id: str) -> str:
     """Deletes an event given its Event ID."""
+    if calendar_service is None:
+        return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
+
     try:
         calendar_service.events().delete(calendarId='primary', eventId=event_id.strip()).execute()
         return f"🗑️ Event '{event_id}' deleted successfully."
@@ -98,6 +122,9 @@ def update_event(details: str) -> str:
     Updates an event time or summary.
     Expects input format: 'EventID | NewSummary | NewStartISO | NewEndISO'
     """
+    if calendar_service is None:
+        return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
+
     try:
         parts = [p.strip() for p in details.split('|')]
         event_id, summary, start_time, end_time = parts[0], parts[1], parts[2], parts[3]
@@ -122,7 +149,37 @@ tools = [
 ]
 
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GEMINI_API_KEY)
-agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+agent = None
+
+try:
+    if hub is not None and create_react_agent is not None and AgentExecutor is not None:
+        prompt = hub.pull("hwchase17/react") if hasattr(hub, "pull") else None
+        agent_runner = create_react_agent(llm, tools, prompt)
+        agent_executor = AgentExecutor(
+            agent=agent_runner,
+            tools=tools,
+            verbose=True,
+            handle_parsing_errors=True,
+        )
+        agent = agent_executor
+except Exception:
+    agent = None
+
+if agent is None:
+    from langchain.agents import initialize_agent, AgentType
+    agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+
+
+def run_agent(user_text: str) -> str:
+    try:
+        if hasattr(agent, "invoke"):
+            result = agent.invoke({"input": user_text})
+            if isinstance(result, dict):
+                return result.get("output", str(result))
+            return str(result)
+        return agent.run(user_text)
+    except Exception as exc:
+        return f"Error processing request: {exc}"
 
 
 # ---------------------------------------------------------
@@ -190,7 +247,7 @@ async def telegram_webhook(request: Request):
         TELEGRAM_CHAT_ID = chat_id  # Save chat ID for background notifications
         
         # Process message with Gemini Agent
-        response = agent.run(user_text)
+        response = run_agent(user_text)
         
         # Reply back to Telegram
         send_telegram_message(chat_id, response)
