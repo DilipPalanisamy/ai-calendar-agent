@@ -246,7 +246,7 @@ elif MODERN_REACT_AVAILABLE:
     agent_runner = create_react_agent(llm, tools, prompt)
     agent_instance = AgentExecutor(agent=agent_runner, tools=tools, verbose=True, handle_parsing_errors=True)
 else:
-    raise ImportError("Unable to import a valid LangChain agent runner.")
+    agent_instance = None
 
 
 def run_agent(user_text: str) -> str:
@@ -255,6 +255,12 @@ def run_agent(user_text: str) -> str:
         return "Please enter a valid request or message."
 
     try:
+        if agent_instance is None:
+            response = llm.invoke(
+                f"{system_prompt}\n\nUser request: {cleaned_input}\n"
+                "Respond clearly. If the request requires a calendar or Gmail action, explain the requested action."
+            )
+            return response.content if hasattr(response, "content") else str(response)
         if USING_MODERN_CREATE_AGENT:
             res = agent_instance.invoke({"messages": [HumanMessage(content=cleaned_input)]})
             if isinstance(res, dict) and "messages" in res and res["messages"]:
