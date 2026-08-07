@@ -14,6 +14,7 @@ from langchain_core.tools import Tool
 from langchain_core.messages import HumanMessage
 
 import calendar_service as calendar_service_module
+from parser import parse_schedule_message
 
 # ---------------------------------------------------------
 # 📦 LANGCHAIN AGENT IMPORT FALLBACKS
@@ -251,6 +252,64 @@ else:
     agent_instance = None
 
 
+def is_quota_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(term in message for term in ["quota", "resource_exhausted", "429"])
+
+
+def run_calendar_without_llm(user_text: str) -> str:
+    """Handle common calendar requests when Gemini quota is unavailable."""
+    try:
+        parsed_data = parse_schedule_message(user_text)
+        replies = []
+
+        for event in parsed_data.events:
+            action = event.action.upper()
+            if action == "CREATE":
+                conflicts = calendar_service_module.check_calendar_conflict(
+                    event.start_time, event.end_time
+                )
+                if conflicts:
+                    replies.append(f"Conflict detected with: {', '.join(conflicts)}")
+                link = calendar_service_module.create_google_calendar_event(event)
+                replies.append(
+                    f"Event created: {event.event_name}\n"
+                    f"Time: {event.start_time} to {event.end_time}\n"
+                    f"Calendar link: {link}"
+                )
+            elif action == "LIST":
+                events = calendar_service_module.list_google_calendar_events(
+                    event.start_time, event.end_time
+                )
+                if not events:
+                    replies.append("No events found for that date.")
+                else:
+                    replies.append("\n".join(
+                        f"{item['summary']} at {item['start']}" for item in events
+                    ))
+            elif action == "DELETE":
+                target = calendar_service_module.find_event_by_title(event.event_name)
+                if target and calendar_service_module.delete_google_calendar_event(target['id']):
+                    replies.append(f"Deleted event: {target.get('summary', event.event_name)}")
+                else:
+                    replies.append(f"Could not find event: {event.event_name}")
+            elif action == "RESCHEDULE":
+                target = calendar_service_module.find_event_by_title(event.event_name)
+                if not target:
+                    replies.append(f"Could not find event: {event.event_name}")
+                else:
+                    link = calendar_service_module.reschedule_google_calendar_event(
+                        target['id'], event.start_time, event.end_time
+                    )
+                    replies.append(f"Event rescheduled: {event.event_name}\nCalendar link: {link}")
+
+        return "\n\n".join(replies)
+    except Exception as exc:
+        if "missing credentials" in str(exc).lower() or "credentials" in str(exc).lower():
+            return "Calendar is not authenticated on Render. Set GOOGLE_TOKEN_BASE64 using your token.json contents, then redeploy."
+        return f"Gemini quota is exhausted, and the Calendar fallback failed: {exc}"
+
+
 def run_agent(user_text: str) -> str:
     cleaned_input = user_text.strip() if user_text else ""
     if not cleaned_input:
@@ -274,6 +333,8 @@ def run_agent(user_text: str) -> str:
                 return res.get("output", str(res))
             return str(res)
     except Exception as exc:
+        if is_quota_error(exc):
+            return run_calendar_without_llm(cleaned_input)
         return f"Error processing request: {exc}"
 
 
