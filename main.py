@@ -43,14 +43,14 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Saved after first user messa
 
 def get_gemini_model_candidates(preferred_model: str | None = None):
     """Return a safe list of Gemini model names, avoiding legacy unsupported ones."""
-    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-2.0-flash-lite").strip()
+    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-2.5-flash").strip()
     normalized = configured_model.removeprefix("models/") if configured_model.startswith("models/") else configured_model
 
     candidates = []
     if normalized and normalized not in {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest"}:
         candidates.append(normalized)
 
-    for fallback_model in ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-2.5-flash"]:
+    for fallback_model in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]:
         if fallback_model not in candidates:
             candidates.append(fallback_model)
 
@@ -211,47 +211,20 @@ tools = [
 ]
 
 DEFAULT_GEMINI_MODEL = get_gemini_model_candidates()[0]
+llm = ChatGoogleGenerativeAI(model=DEFAULT_GEMINI_MODEL, google_api_key=GEMINI_API_KEY)
 system_prompt = "You are a helpful assistant for an AI calendar agent. Use the available tools to answer user requests about calendar events, Gmail invites, and scheduling."
 
-
-def is_quota_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return any(term in message for term in ["quota", "resource_exhausted", "429"])
-
-
-def create_chat_model(model_name: str) -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(model=model_name, google_api_key=GEMINI_API_KEY)
-
-
-def create_agent_for_model(model_name: str):
-    llm = create_chat_model(model_name)
-    if USING_MODERN_CREATE_AGENT:
-        return create_agent(model=llm, tools=tools, system_prompt=system_prompt)
-    elif MODERN_REACT_AVAILABLE:
-        try:
-            prompt = hub.pull("hwchase17/react")
-        except Exception:
-            prompt = system_prompt
-        agent_runner = create_react_agent(llm, tools, prompt)
-        return AgentExecutor(agent=agent_runner, tools=tools, verbose=True, handle_parsing_errors=True)
-    else:
-        raise ImportError("Unable to import a valid LangChain agent runner.")
-
-
-def invoke_agent(agent, user_text: str) -> str:
-    if USING_MODERN_CREATE_AGENT:
-        res = agent.invoke({"messages": [HumanMessage(content=user_text)]})
-        if isinstance(res, dict) and "messages" in res and res["messages"]:
-            return res["messages"][-1].content
-        return str(res)
-    else:
-        res = agent.invoke({"input": user_text})
-        if isinstance(res, dict):
-            return res.get("output", str(res))
-        return str(res)
-
-
-agent_instance = create_agent_for_model(DEFAULT_GEMINI_MODEL)
+if USING_MODERN_CREATE_AGENT:
+    agent_instance = create_agent(model=llm, tools=tools, system_prompt=system_prompt)
+elif MODERN_REACT_AVAILABLE:
+    try:
+        prompt = hub.pull("hwchase17/react")
+    except Exception:
+        prompt = system_prompt
+    agent_runner = create_react_agent(llm, tools, prompt)
+    agent_instance = AgentExecutor(agent=agent_runner, tools=tools, verbose=True, handle_parsing_errors=True)
+else:
+    raise ImportError("Unable to import a valid LangChain agent runner.")
 
 
 def run_agent(user_text: str) -> str:
@@ -260,17 +233,19 @@ def run_agent(user_text: str) -> str:
         return "Please enter a valid request or message."
 
     try:
-        return invoke_agent(agent_instance, cleaned_input)
+        if USING_MODERN_CREATE_AGENT:
+            # Modern create_agent workflow using message objects
+            res = agent_instance.invoke({"messages": [HumanMessage(content=cleaned_input)]})
+            if isinstance(res, dict) and "messages" in res and res["messages"]:
+                return res["messages"][-1].content
+            return str(res)
+        else:
+            # ReAct AgentExecutor workflow
+            res = agent_instance.invoke({"input": cleaned_input})
+            if isinstance(res, dict):
+                return res.get("output", str(res))
+            return str(res)
     except Exception as exc:
-        if is_quota_error(exc):
-            for fallback_model in get_gemini_model_candidates()[1:]:
-                try:
-                    fallback_agent = create_agent_for_model(fallback_model)
-                    return invoke_agent(fallback_agent, cleaned_input)
-                except Exception as fallback_exc:
-                    if not is_quota_error(fallback_exc):
-                        return f"Error processing request: {fallback_exc}"
-            return "Error processing request: Quota exhausted on all Gemini model candidates. Please check your Google Cloud quota or billing settings."
         return f"Error processing request: {exc}"
 
 
