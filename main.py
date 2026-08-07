@@ -86,7 +86,9 @@ try:
 except Exception as exc:  # pragma: no cover - runtime fallback
     creds = None
     calendar_service = None
-    CALENDAR_INIT_ERROR = str(exc)
+    CALENDAR_INIT_ERROR = (
+        f"{exc}. On Render, set GOOGLE_TOKEN_BASE64 to the base64 contents of token.json."
+    )
 
 
 # ---------------------------------------------------------

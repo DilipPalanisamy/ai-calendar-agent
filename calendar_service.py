@@ -50,7 +50,7 @@ def get_google_credentials():
         except Exception:
             creds = None
     else:
-        token_info = _json_secret('GOOGLE_TOKEN_JSON', 'GOOGLE_TOKEN_BASE64')
+        token_info = _json_secret('GOOGLE_TOKEN_JSON', 'GOOGLE_TOKEN_BASE64', 'GOOGLE_TOKEN')
         if token_info:
             try:
                 creds = Credentials.from_authorized_user_info(token_info, SCOPES)
@@ -65,7 +65,11 @@ def get_google_credentials():
                 creds = None
 
         if not creds or not creds.valid or not _has_required_scopes(creds):
-            client_config = _json_secret('GOOGLE_CREDENTIALS_JSON', 'GOOGLE_CREDENTIALS_BASE64')
+            client_config = _json_secret(
+                'GOOGLE_CREDENTIALS_JSON',
+                'GOOGLE_CREDENTIALS_BASE64',
+                'GOOGLE_CREDENTIALS',
+            )
             if not CREDENTIALS_PATH.exists() and not client_config:
                 raise FileNotFoundError(f'Missing credentials file: {CREDENTIALS_PATH}')
 
