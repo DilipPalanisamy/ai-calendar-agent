@@ -10,26 +10,28 @@ from googleapiclient.discovery import build
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import Tool
+from langchain_core.messages import HumanMessage
 
 import calendar_service as calendar_service_module
 
+# ---------------------------------------------------------
+# 📦 LANGCHAIN AGENT IMPORT FALLBACKS
+# ---------------------------------------------------------
+USING_MODERN_CREATE_AGENT = False
+
 try:
-    from langchain.agents import AgentExecutor, create_react_agent
+    from langchain.agents import create_react_agent, AgentExecutor
+    from langchain import hub
+    MODERN_REACT_AVAILABLE = True
 except ImportError:
-    from langchain.agents import create_agent
+    MODERN_REACT_AVAILABLE = False
 
-    class AgentExecutor:
-        def __init__(self, agent, tools, verbose=False, handle_parsing_errors=True):
-            self.agent = agent
-            self.tools = tools
-            self.verbose = verbose
-            self.handle_parsing_errors = handle_parsing_errors
-
-        def invoke(self, inputs):
-            return self.agent.invoke(inputs)
-
-    def create_react_agent(*args, **kwargs):
-        return create_agent(*args, **kwargs)
+if not MODERN_REACT_AVAILABLE:
+    try:
+        from langchain.agents import create_agent
+        USING_MODERN_CREATE_AGENT = True
+    except ImportError:
+        create_agent = None
 
 load_dotenv()
 
@@ -193,23 +195,39 @@ tools = [
 
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GEMINI_API_KEY)
 
-# Modern ReAct Agent setup
-prompt = """You are a helpful assistant for an AI calendar agent. Use the available tools to answer user requests about calendar events, Gmail invites, and scheduling."""
-agent_runner = create_react_agent(llm, tools, system_prompt=prompt)
-agent_executor = AgentExecutor(
-    agent=agent_runner,
-    tools=tools,
-    verbose=True,
-    handle_parsing_errors=True
-)
+system_prompt = "You are a helpful assistant for an AI calendar agent. Use the available tools to answer user requests about calendar events, Gmail invites, and scheduling."
+
+if USING_MODERN_CREATE_AGENT:
+    agent_instance = create_agent(model=llm, tools=tools, system_prompt=system_prompt)
+elif MODERN_REACT_AVAILABLE:
+    try:
+        prompt = hub.pull("hwchase17/react")
+    except Exception:
+        prompt = system_prompt
+    agent_runner = create_react_agent(llm, tools, prompt)
+    agent_instance = AgentExecutor(agent=agent_runner, tools=tools, verbose=True, handle_parsing_errors=True)
+else:
+    raise ImportError("Unable to import a valid LangChain agent runner.")
 
 
 def run_agent(user_text: str) -> str:
+    cleaned_input = user_text.strip() if user_text else ""
+    if not cleaned_input:
+        return "Please enter a valid request or message."
+
     try:
-        result = agent_executor.invoke({"input": user_text})
-        if isinstance(result, dict):
-            return result.get("output", str(result))
-        return str(result)
+        if USING_MODERN_CREATE_AGENT:
+            # Modern create_agent workflow using message objects
+            res = agent_instance.invoke({"messages": [HumanMessage(content=cleaned_input)]})
+            if isinstance(res, dict) and "messages" in res and res["messages"]:
+                return res["messages"][-1].content
+            return str(res)
+        else:
+            # ReAct AgentExecutor workflow
+            res = agent_instance.invoke({"input": cleaned_input})
+            if isinstance(res, dict):
+                return res.get("output", str(res))
+            return str(res)
     except Exception as exc:
         return f"Error processing request: {exc}"
 
@@ -296,7 +314,7 @@ async def telegram_webhook(request: Request):
             welcome_text = (
                 "👋 **Welcome to your AI Calendar Assistant!**\n\n"
                 "• 📅 View schedule: *'What is on my schedule today?'*\n"
-                "• ➕ Add event: *'Schedule tea tomorrow at 4 PM'* \n"
+                "• ➕ Add event: *'Schedule tea tomorrow at 4 PM'*\n"
                 "• ☕ Scan Gmail: *'Check my emails for tea invites'*\n"
                 "• 🗑️ Delete event: *'Delete event [Event ID]'"
             )
