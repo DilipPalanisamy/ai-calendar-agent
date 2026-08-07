@@ -193,7 +193,8 @@ tools = [
     Tool(name="CheckGmailInvites", func=check_gmail_for_invites, description="Checks unread Gmail messages for tea, coffee, or meetup invitations.")
 ]
 
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GEMINI_API_KEY)
+# UPDATED LINE:
+llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", google_api_key=GEMINI_API_KEY)
 
 system_prompt = "You are a helpful assistant for an AI calendar agent. Use the available tools to answer user requests about calendar events, Gmail invites, and scheduling."
 
