@@ -5,40 +5,49 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 import requests
 
-from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.tools import Tool
+from langchain_core.tools import Tool
+
+from calendar_service import get_google_credentials
 
 try:
-    from langchain import hub
-except ImportError:  # pragma: no cover - compatibility fallback
-    hub = None
+    from langchain.agents import AgentExecutor, create_react_agent
+except ImportError:
+    from langchain.agents import create_agent
 
-try:
-    from langchain.agents import create_react_agent, AgentExecutor
-except ImportError:  # pragma: no cover - compatibility fallback
-    create_react_agent = None
-    AgentExecutor = None
+    class AgentExecutor:
+        def __init__(self, agent, tools, verbose=False, handle_parsing_errors=True):
+            self.agent = agent
+            self.tools = tools
+            self.verbose = verbose
+            self.handle_parsing_errors = handle_parsing_errors
+
+        def invoke(self, inputs):
+            return self.agent.invoke(inputs)
+
+    def create_react_agent(*args, **kwargs):
+        return create_agent(*args, **kwargs)
 
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+ALLOWED_CHAT_ID = os.getenv("ALLOWED_CHAT_ID")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Saved after first user message
 
 app = FastAPI()
 scheduler = AsyncIOScheduler()
 
-# Initialize Google Calendar Service
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+# Initialize Google Calendar & Gmail Service
 try:
-    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    creds = get_google_credentials()
     calendar_service = build('calendar', 'v3', credentials=creds)
     CALENDAR_INIT_ERROR = None
 except Exception as exc:  # pragma: no cover - runtime fallback
+    creds = None
     calendar_service = None
     CALENDAR_INIT_ERROR = str(exc)
 
@@ -140,44 +149,67 @@ def update_event(details: str) -> str:
         return f"Error updating event: {str(e)}"
 
 
-# LangChain Agent Setup
+# ---------------------------------------------------------
+# 📧 GMAIL TOOLS
+# ---------------------------------------------------------
+
+def check_gmail_for_invites(query: str = "") -> str:
+    """Checks unread Gmail messages for tea/coffee invitations and returns details."""
+    if creds is None:
+        return "Google account is not authenticated yet. Please complete the sign-in flow to create token.json."
+
+    try:
+        gmail_service = build('gmail', 'v1', credentials=creds)
+        results = gmail_service.users().messages().list(
+            userId='me', q='is:unread (tea OR coffee OR meetup)'
+        ).execute()
+        
+        messages = results.get('messages', [])
+        if not messages:
+            return "No new tea or coffee invites found in Gmail."
+
+        invites = []
+        for msg in messages[:5]:
+            email = gmail_service.users().messages().get(userId='me', id=msg['id']).execute()
+            snippet = email.get('snippet', '')
+            invites.append(f"Email ID: {msg['id']} | Content: {snippet}")
+
+        return "\n".join(invites)
+    except Exception as e:
+        return f"Error reading Gmail: {str(e)}"
+
+
+# ---------------------------------------------------------
+# 🛠️ TOOLS & AGENT SETUP
+# ---------------------------------------------------------
+
 tools = [
     Tool(name="ListEvents", func=list_events, description="Lists upcoming calendar events."),
     Tool(name="CreateEvent", func=create_event, description="Creates a new event. Format: 'Summary | StartISO | EndISO'"),
     Tool(name="DeleteEvent", func=delete_event, description="Deletes an event using its Event ID."),
-    Tool(name="UpdateEvent", func=update_event, description="Updates an event. Format: 'EventID | Summary | StartISO | EndISO'")
+    Tool(name="UpdateEvent", func=update_event, description="Updates an event. Format: 'EventID | Summary | StartISO | EndISO'"),
+    Tool(name="CheckGmailInvites", func=check_gmail_for_invites, description="Checks unread Gmail messages for tea, coffee, or meetup invitations.")
 ]
 
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GEMINI_API_KEY)
-agent = None
 
-try:
-    if hub is not None and create_react_agent is not None and AgentExecutor is not None:
-        prompt = hub.pull("hwchase17/react") if hasattr(hub, "pull") else None
-        agent_runner = create_react_agent(llm, tools, prompt)
-        agent_executor = AgentExecutor(
-            agent=agent_runner,
-            tools=tools,
-            verbose=True,
-            handle_parsing_errors=True,
-        )
-        agent = agent_executor
-except Exception:
-    agent = None
-
-if agent is None:
-    from langchain.agents import initialize_agent, AgentType
-    agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+# Modern ReAct Agent setup
+prompt = """You are a helpful assistant for an AI calendar agent. Use the available tools to answer user requests about calendar events, Gmail invites, and scheduling."""
+agent_runner = create_react_agent(llm, tools, system_prompt=prompt)
+agent_executor = AgentExecutor(
+    agent=agent_runner,
+    tools=tools,
+    verbose=True,
+    handle_parsing_errors=True
+)
 
 
 def run_agent(user_text: str) -> str:
     try:
-        if hasattr(agent, "invoke"):
-            result = agent.invoke({"input": user_text})
-            if isinstance(result, dict):
-                return result.get("output", str(result))
-            return str(result)
-        return agent.run(user_text)
+        result = agent_executor.invoke({"input": user_text})
+        if isinstance(result, dict):
+            return result.get("output", str(result))
+        return str(result)
     except Exception as exc:
         return f"Error processing request: {exc}"
 
@@ -193,7 +225,7 @@ def send_telegram_message(chat_id: str, text: str):
 
 async def check_upcoming_reminders():
     """Checks for events starting in the next 15 minutes and sends an alert."""
-    if not TELEGRAM_CHAT_ID:
+    if not TELEGRAM_CHAT_ID or calendar_service is None:
         return
     
     now = datetime.datetime.utcnow()
@@ -207,10 +239,18 @@ async def check_upcoming_reminders():
     ).execute()
     
     for event in events_result.get('items', []):
-        # Send reminder alert
         summary = event.get('summary', 'Upcoming Event')
         start = event['start'].get('dateTime', 'soon')
         send_telegram_message(TELEGRAM_CHAT_ID, f"⏰ REMINDER: '{summary}' starts in 15 minutes ({start})!")
+
+
+async def auto_scan_tea_invites():
+    """Checks Gmail every 15 minutes for new tea invites."""
+    if not TELEGRAM_CHAT_ID:
+        return
+    invites = check_gmail_for_invites()
+    if "No new" not in invites and "Error" not in invites:
+        send_telegram_message(TELEGRAM_CHAT_ID, f"☕ **New Invitation Detected in Gmail:**\n\n{invites}")
 
 
 async def send_daily_briefing():
@@ -225,9 +265,8 @@ async def send_daily_briefing():
 
 @app.on_event("startup")
 def start_background_jobs():
-    # Check for event reminders every 5 minutes
     scheduler.add_job(check_upcoming_reminders, 'interval', minutes=5)
-    # Daily morning briefing at 08:00 AM
+    scheduler.add_job(auto_scan_tea_invites, 'interval', minutes=15)
     scheduler.add_job(send_daily_briefing, 'cron', hour=8, minute=0)
     scheduler.start()
 
@@ -243,13 +282,29 @@ async def telegram_webhook(request: Request):
     
     if "message" in data and "text" in data["message"]:
         chat_id = str(data["message"]["chat"]["id"])
-        user_text = data["message"]["text"]
-        TELEGRAM_CHAT_ID = chat_id  # Save chat ID for background notifications
+        user_text = data["message"]["text"].strip()
+
+        # 🔒 Security Lockdown Check
+        if ALLOWED_CHAT_ID and chat_id != str(ALLOWED_CHAT_ID):
+            print(f"Unauthorized access blocked from Chat ID: {chat_id}")
+            return {"status": "unauthorized"}
         
-        # Process message with Gemini Agent
+        TELEGRAM_CHAT_ID = chat_id  # Save verified ID
+
+        # Welcome Menu Response
+        if user_text.lower() in ["/start", "/help", "hi", "hello"]:
+            welcome_text = (
+                "👋 **Welcome to your AI Calendar Assistant!**\n\n"
+                "• 📅 View schedule: *'What is on my schedule today?'*\n"
+                "• ➕ Add event: *'Schedule tea tomorrow at 4 PM'* \n"
+                "• ☕ Scan Gmail: *'Check my emails for tea invites'*\n"
+                "• 🗑️ Delete event: *'Delete event [Event ID]'"
+            )
+            send_telegram_message(chat_id, welcome_text)
+            return {"status": "ok"}
+        
+        # Process request through Gemini Agent
         response = run_agent(user_text)
-        
-        # Reply back to Telegram
         send_telegram_message(chat_id, response)
         
     return {"status": "ok"}
