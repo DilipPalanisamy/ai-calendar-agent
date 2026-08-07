@@ -1,27 +1,62 @@
-import os.path
 import re
 import datetime
+from pathlib import Path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+SCOPES = [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/gmail.readonly'
+]
+BASE_DIR = Path(__file__).resolve().parent
+TOKEN_PATH = BASE_DIR / 'token.json'
+CREDENTIALS_PATH = BASE_DIR / 'credentials.json'
+
+
+def _has_required_scopes(creds) -> bool:
+    if not creds or not creds.valid:
+        return False
+    granted_scopes = set(getattr(creds, 'scopes', []) or [])
+    return set(SCOPES).issubset(granted_scopes)
+
+
+def get_google_credentials():
+    creds = None
+    if TOKEN_PATH.exists():
+        try:
+            creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+        except Exception:
+            creds = None
+
+    if not creds or not creds.valid or not _has_required_scopes(creds):
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+            except Exception:
+                creds = None
+
+        if not creds or not creds.valid or not _has_required_scopes(creds):
+            if not CREDENTIALS_PATH.exists():
+                raise FileNotFoundError(f'Missing credentials file: {CREDENTIALS_PATH}')
+
+            if TOKEN_PATH.exists():
+                TOKEN_PATH.unlink(missing_ok=True)
+
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
+            try:
+                creds = flow.run_local_server(port=0)
+            except Exception:
+                creds = flow.run_console()
+
+        TOKEN_PATH.write_text(creds.to_json(), encoding='utf-8')
+
+    return creds
 
 
 def get_calendar_service():
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-
+    creds = get_google_credentials()
     return build('calendar', 'v3', credentials=creds)
 
 

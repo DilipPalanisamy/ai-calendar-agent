@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import Tool
 
-from calendar_service import get_google_credentials
+import calendar_service as calendar_service_module
 
 try:
     from langchain.agents import AgentExecutor, create_react_agent
@@ -43,7 +43,7 @@ scheduler = AsyncIOScheduler()
 
 # Initialize Google Calendar & Gmail Service
 try:
-    creds = get_google_credentials()
+    creds = calendar_service_module.get_google_credentials()
     calendar_service = build('calendar', 'v3', credentials=creds)
     CALENDAR_INIT_ERROR = None
 except Exception as exc:  # pragma: no cover - runtime fallback
