@@ -194,8 +194,7 @@ tools = [
 ]
 
 # UPDATED LINE:
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", google_api_key=GEMINI_API_KEY)
-
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GEMINI_API_KEY)
 system_prompt = "You are a helpful assistant for an AI calendar agent. Use the available tools to answer user requests about calendar events, Gmail invites, and scheduling."
 
 if USING_MODERN_CREATE_AGENT:
