@@ -14,6 +14,22 @@ except ImportError:
 load_dotenv()
 
 
+def get_gemini_model_candidates(preferred_model: str | None = None):
+    """Return a safe list of Gemini model names, avoiding legacy unsupported ones."""
+    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-2.0-flash-lite").strip()
+    normalized = configured_model.removeprefix("models/") if configured_model.startswith("models/") else configured_model
+
+    candidates = []
+    if normalized and normalized not in {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest"}:
+        candidates.append(normalized)
+
+    for fallback_model in ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-2.5-flash"]:
+        if fallback_model not in candidates:
+            candidates.append(fallback_model)
+
+    return candidates
+
+
 class CalendarEvent(BaseModel):
     action: str = Field(default="CREATE", description="Action type: 'CREATE', 'DELETE', 'RESCHEDULE', or 'LIST'")
     event_name: str = Field(description="The title or query summary of the target event")
@@ -29,7 +45,7 @@ class MultiCalendarEvents(BaseModel):
 
 if ChatGoogleGenerativeAI is not None and os.getenv("GEMINI_API_KEY"):
     llm = ChatGoogleGenerativeAI(
-        model="models/gemini-2.0-flash-lite",
+        model=get_gemini_model_candidates()[0],
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0,
     )
