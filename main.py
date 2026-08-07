@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import os
 import datetime
 import asyncio
@@ -43,22 +44,39 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Saved after first user messa
 
 def get_gemini_model_candidates(preferred_model: str | None = None):
     """Return a safe list of Gemini model names, avoiding legacy unsupported ones."""
-    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-3.5-flash").strip()
+    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-2.5-flash").strip()
     normalized = configured_model.removeprefix("models/") if configured_model.startswith("models/") else configured_model
 
     candidates = []
     if normalized and normalized not in {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest"}:
         candidates.append(normalized)
 
-    for fallback_model in ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "gemini-2.0-flash"]:
+    for fallback_model in ["gemini-2.5-flash", "gemini-2.0-flash"]:
         if fallback_model not in candidates:
             candidates.append(fallback_model)
 
     return candidates
 
 
-app = FastAPI()
+# ---------------------------------------------------------
+# ⚙️ FASTAPI LIFESPAN & SCHEDULER SETUP
+# ---------------------------------------------------------
 scheduler = AsyncIOScheduler()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Schedule background tasks
+    scheduler.add_job(check_upcoming_reminders, 'interval', minutes=5)
+    scheduler.add_job(auto_scan_tea_invites, 'interval', minutes=15)
+    scheduler.add_job(send_daily_briefing, 'cron', hour=8, minute=0)
+    scheduler.start()
+    
+    yield  # Application runs
+    
+    # Shutdown
+    scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
 
 # Initialize Google Calendar & Gmail Service
 try:
@@ -211,7 +229,11 @@ tools = [
 ]
 
 DEFAULT_GEMINI_MODEL = get_gemini_model_candidates()[0]
-llm = ChatGoogleGenerativeAI(model=DEFAULT_GEMINI_MODEL, google_api_key=GEMINI_API_KEY)
+llm = ChatGoogleGenerativeAI(
+    model=DEFAULT_GEMINI_MODEL,
+    google_api_key=GEMINI_API_KEY,
+    max_retries=3
+)
 system_prompt = "You are a helpful assistant for an AI calendar agent. Use the available tools to answer user requests about calendar events, Gmail invites, and scheduling."
 
 if USING_MODERN_CREATE_AGENT:
@@ -234,13 +256,11 @@ def run_agent(user_text: str) -> str:
 
     try:
         if USING_MODERN_CREATE_AGENT:
-            # Modern create_agent workflow using message objects
             res = agent_instance.invoke({"messages": [HumanMessage(content=cleaned_input)]})
             if isinstance(res, dict) and "messages" in res and res["messages"]:
                 return res["messages"][-1].content
             return str(res)
         else:
-            # ReAct AgentExecutor workflow
             res = agent_instance.invoke({"input": cleaned_input})
             if isinstance(res, dict):
                 return res.get("output", str(res))
@@ -250,7 +270,7 @@ def run_agent(user_text: str) -> str:
 
 
 # ---------------------------------------------------------
-# ⏰ BACKGROUND SCHEDULER (REMINDERS & DAILY BRIEFINGS)
+# ⏰ BACKGROUND SCHEDULER TASKS
 # ---------------------------------------------------------
 
 def send_telegram_message(chat_id: str, text: str):
@@ -298,14 +318,6 @@ async def send_daily_briefing():
     send_telegram_message(TELEGRAM_CHAT_ID, briefing_text)
 
 
-@app.on_event("startup")
-def start_background_jobs():
-    scheduler.add_job(check_upcoming_reminders, 'interval', minutes=5)
-    scheduler.add_job(auto_scan_tea_invites, 'interval', minutes=15)
-    scheduler.add_job(send_daily_briefing, 'cron', hour=8, minute=0)
-    scheduler.start()
-
-
 # ---------------------------------------------------------
 # 💬 TELEGRAM WEBHOOK ROUTE
 # ---------------------------------------------------------
@@ -319,14 +331,14 @@ async def telegram_webhook(request: Request):
         chat_id = str(data["message"]["chat"]["id"])
         user_text = data["message"]["text"].strip()
 
-        # 🔒 Security Lockdown Check
+        # Security Check
         if ALLOWED_CHAT_ID and chat_id != str(ALLOWED_CHAT_ID):
             print(f"Unauthorized access blocked from Chat ID: {chat_id}")
             return {"status": "unauthorized"}
         
-        TELEGRAM_CHAT_ID = chat_id  # Save verified ID
+        TELEGRAM_CHAT_ID = chat_id
 
-        # Welcome Menu Response
+        # Welcome Response
         if user_text.lower() in ["/start", "/help", "hi", "hello"]:
             welcome_text = (
                 "👋 **Welcome to your AI Calendar Assistant!**\n\n"
