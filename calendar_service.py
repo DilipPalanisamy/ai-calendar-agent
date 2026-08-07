@@ -1,5 +1,8 @@
 import re
 import datetime
+import base64
+import json
+import os
 from pathlib import Path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -13,6 +16,23 @@ SCOPES = [
 BASE_DIR = Path(__file__).resolve().parent
 TOKEN_PATH = BASE_DIR / 'token.json'
 CREDENTIALS_PATH = BASE_DIR / 'credentials.json'
+
+
+def _json_secret(*names):
+    """Load a JSON secret from an environment variable, optionally base64 encoded."""
+    for name in names:
+        value = os.getenv(name)
+        if not value:
+            continue
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            try:
+                decoded = base64.b64decode(value).decode('utf-8')
+                return json.loads(decoded)
+            except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+    return None
 
 
 def _has_required_scopes(creds) -> bool:
@@ -29,6 +49,13 @@ def get_google_credentials():
             creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
         except Exception:
             creds = None
+    else:
+        token_info = _json_secret('GOOGLE_TOKEN_JSON', 'GOOGLE_TOKEN_BASE64')
+        if token_info:
+            try:
+                creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+            except Exception:
+                creds = None
 
     if not creds or not creds.valid or not _has_required_scopes(creds):
         if creds and creds.expired and creds.refresh_token:
@@ -38,13 +65,17 @@ def get_google_credentials():
                 creds = None
 
         if not creds or not creds.valid or not _has_required_scopes(creds):
-            if not CREDENTIALS_PATH.exists():
+            client_config = _json_secret('GOOGLE_CREDENTIALS_JSON', 'GOOGLE_CREDENTIALS_BASE64')
+            if not CREDENTIALS_PATH.exists() and not client_config:
                 raise FileNotFoundError(f'Missing credentials file: {CREDENTIALS_PATH}')
 
             if TOKEN_PATH.exists():
                 TOKEN_PATH.unlink(missing_ok=True)
 
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
+            if client_config:
+                flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
             try:
                 creds = flow.run_local_server(port=0)
             except Exception:
