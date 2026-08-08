@@ -11,6 +11,8 @@ from calendar_service import (
     find_event_by_title,
     delete_google_calendar_event,
     reschedule_google_calendar_event,
+    get_primary_calendar_timezone,
+    get_calendar_service,
 )
 
 load_dotenv()
@@ -38,6 +40,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         parsed_data = parse_schedule_message(user_text)
         reply_lines = []
+        calendar_timezone = get_primary_calendar_timezone(get_calendar_service())
 
         for event in parsed_data.events:
             action = getattr(event, 'action', 'CREATE').upper()
@@ -57,7 +60,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     link = reschedule_google_calendar_event(target_event['id'], event.start_time, event.end_time)
                     reply_lines.append(
                         f"🔄 **Rescheduled Event:** '{target_event.get('summary')}'\n"
-                        f"⏰ New Time: {event.start_time} to {event.end_time}\n"
+                        f"⏰ New Time ({calendar_timezone}): {event.start_time} to {event.end_time}\n"
                         f"🔗 [View in Google Calendar]({link})\n"
                     )
                 else:
@@ -73,7 +76,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 link = create_google_calendar_event(event)
                 reply_lines.append(
                     f"✅ **Created Event:** {event.event_name}\n"
-                    f"⏰ {event.start_time} to {event.end_time}\n"
+                    f"⏰ {event.start_time} to {event.end_time} ({calendar_timezone})\n"
                     f"🔗 [View in Google Calendar]({link})\n"
                 )
 

@@ -274,7 +274,8 @@ def run_calendar_without_llm(user_text: str) -> str:
                 link = calendar_service_module.create_google_calendar_event(event)
                 replies.append(
                     f"Event created: {event.event_name}\n"
-                    f"Time: {event.start_time} to {event.end_time}\n"
+                    f"Time ({calendar_service_module.get_primary_calendar_timezone(calendar_service)}): "
+                    f"{event.start_time} to {event.end_time}\n"
                     f"Calendar link: {link}"
                 )
             elif action == "LIST":

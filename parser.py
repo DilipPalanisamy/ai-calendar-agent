@@ -2,6 +2,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -71,8 +72,15 @@ def _parse_time_value(text: str):
     return hour, minute
 
 
-def _resolve_date(message_text: str):
-    today = datetime.now().date()
+def _get_timezone(timezone_name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(timezone_name)
+    except Exception:
+        return ZoneInfo("UTC")
+
+
+def _resolve_date(message_text: str, user_timezone: str):
+    today = datetime.now(_get_timezone(user_timezone)).date()
     lower = message_text.lower()
 
     if "tomorrow" in lower:
@@ -91,7 +99,7 @@ def _resolve_date(message_text: str):
     return today
 
 
-def _fallback_parse_single(part_text: str) -> CalendarEvent:
+def _fallback_parse_single(part_text: str, user_timezone: str = "UTC") -> CalendarEvent:
     lower_text = part_text.lower()
     action = "CREATE"
     
@@ -102,7 +110,7 @@ def _fallback_parse_single(part_text: str) -> CalendarEvent:
     elif any(word in lower_text for word in ["list", "show", "what's on", "schedule for", "meetings"]):
         action = "LIST"
 
-    date_value = _resolve_date(part_text)
+    date_value = _resolve_date(part_text, user_timezone)
     
     if action == "LIST":
         start_dt = datetime.combine(date_value, datetime.min.time())
@@ -145,21 +153,23 @@ def _fallback_parse_single(part_text: str) -> CalendarEvent:
     )
 
 
-def _fallback_parse(message_text: str, user_timezone: str = "UTC") -> MultiCalendarEvents:
+def _fallback_parse(message_text: str, user_timezone: str | None = None) -> MultiCalendarEvents:
+    user_timezone = user_timezone or os.getenv("CALENDAR_TIMEZONE") or "UTC"
     cleaned_text = re.sub(r"\s+", " ", message_text).strip()
     parts = re.split(r"\s+and\s+|,", cleaned_text, flags=re.IGNORECASE)
-    events = [_fallback_parse_single(part) for part in parts if part.strip()]
-    return MultiCalendarEvents(events=events if events else [_fallback_parse_single(cleaned_text)])
+    events = [_fallback_parse_single(part, user_timezone) for part in parts if part.strip()]
+    return MultiCalendarEvents(events=events if events else [_fallback_parse_single(cleaned_text, user_timezone)])
 
 
-def parse_schedule_message(message_text: str, user_timezone: str = "UTC") -> MultiCalendarEvents:
+def parse_schedule_message(message_text: str, user_timezone: str | None = None) -> MultiCalendarEvents:
+    user_timezone = user_timezone or os.getenv("CALENDAR_TIMEZONE") or "UTC"
     if structured_llm is None:
         return _fallback_parse(message_text, user_timezone)
 
     prompt = f"""
     You are an expert scheduling assistant. Extract ALL intent operations mentioned in the message.
 
-    Current Date: August 5, 2026
+    Current Date: {datetime.now(_get_timezone(user_timezone)).date().isoformat()}
     User Timezone: {user_timezone}
 
     Guidelines:

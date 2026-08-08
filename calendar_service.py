@@ -4,6 +4,7 @@ import base64
 import json
 import os
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -105,14 +106,26 @@ def get_primary_calendar_timezone(service) -> str:
     return calendar.get('timeZone', 'UTC')
 
 
+def _api_time(iso_value: str, timezone_name: str) -> str:
+    """Convert a naive local ISO time to the UTC format expected by Calendar queries."""
+    if "Z" in iso_value or "+" in iso_value:
+        return iso_value
+
+    local_dt = datetime.datetime.fromisoformat(iso_value).replace(
+        tzinfo=ZoneInfo(timezone_name)
+    )
+    return local_dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def check_calendar_conflict(start_time_iso: str, end_time_iso: str) -> list:
     """Checks if there are existing events overlapping with the requested window."""
     if not start_time_iso or not end_time_iso:
         return []
 
     service = get_calendar_service()
-    start_dt = start_time_iso if ("Z" in start_time_iso or "+" in start_time_iso) else f"{start_time_iso}Z"
-    end_dt = end_time_iso if ("Z" in end_time_iso or "+" in end_time_iso) else f"{end_time_iso}Z"
+    calendar_timezone = get_primary_calendar_timezone(service)
+    start_dt = _api_time(start_time_iso, calendar_timezone)
+    end_dt = _api_time(end_time_iso, calendar_timezone)
 
     events_result = service.events().list(
         calendarId='primary',
@@ -129,13 +142,14 @@ def check_calendar_conflict(start_time_iso: str, end_time_iso: str) -> list:
 def find_event_by_title(title_query: str, time_min_iso: str = None) -> dict:
     """Searches primary calendar for an event matching a title/summary query."""
     service = get_calendar_service()
+    calendar_timezone = get_primary_calendar_timezone(service)
 
     clean_query = re.sub(r"\b(tomorrow|today|next\s+\w+)\b", "", title_query, flags=re.IGNORECASE).strip()
 
     if not time_min_iso:
         time_min_iso = datetime.datetime.utcnow().isoformat() + "Z"
-    elif "Z" not in time_min_iso and "+" not in time_min_iso:
-        time_min_iso = f"{time_min_iso}Z"
+    else:
+        time_min_iso = _api_time(time_min_iso, calendar_timezone)
 
     events_result = service.events().list(
         calendarId='primary',
@@ -162,13 +176,13 @@ def delete_google_calendar_event(event_id: str) -> bool:
 def reschedule_google_calendar_event(event_id: str, new_start_iso: str, new_end_iso: str) -> str:
     """Updates start and end time of an existing Google Calendar event."""
     service = get_calendar_service()
-
-    start_dt = new_start_iso if ("Z" in new_start_iso or "+" in new_start_iso) else f"{new_start_iso}Z"
-    end_dt = new_end_iso if ("Z" in new_end_iso or "+" in new_end_iso) else f"{new_end_iso}Z"
+    calendar_timezone = get_primary_calendar_timezone(service)
 
     event = service.events().get(calendarId='primary', eventId=event_id).execute()
-    event['start']['dateTime'] = start_dt
-    event['end']['dateTime'] = end_dt
+    event['start']['dateTime'] = new_start_iso
+    event['start']['timeZone'] = calendar_timezone
+    event['end']['dateTime'] = new_end_iso
+    event['end']['timeZone'] = calendar_timezone
 
     updated_event = service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
     return updated_event.get('htmlLink')
@@ -203,9 +217,9 @@ def create_google_calendar_event(event):
 def list_google_calendar_events(start_time_iso: str, end_time_iso: str) -> list:
     """Retrieves all events within a specific time window."""
     service = get_calendar_service()
-
-    start_dt = start_time_iso if ("Z" in start_time_iso or "+" in start_time_iso) else f"{start_time_iso}Z"
-    end_dt = end_time_iso if ("Z" in end_time_iso or "+" in end_time_iso) else f"{end_time_iso}Z"
+    calendar_timezone = get_primary_calendar_timezone(service)
+    start_dt = _api_time(start_time_iso, calendar_timezone)
+    end_dt = _api_time(end_time_iso, calendar_timezone)
 
     events_result = service.events().list(
         calendarId='primary',
