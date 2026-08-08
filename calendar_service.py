@@ -95,6 +95,16 @@ def get_calendar_service():
     return build('calendar', 'v3', credentials=creds)
 
 
+def get_primary_calendar_timezone(service) -> str:
+    """Returns the primary Google Calendar timezone used for local event times."""
+    configured_timezone = os.getenv('CALENDAR_TIMEZONE')
+    if configured_timezone:
+        return configured_timezone
+
+    calendar = service.calendarList().get(calendarId='primary').execute()
+    return calendar.get('timeZone', 'UTC')
+
+
 def check_calendar_conflict(start_time_iso: str, end_time_iso: str) -> list:
     """Checks if there are existing events overlapping with the requested window."""
     if not start_time_iso or not end_time_iso:
@@ -167,9 +177,10 @@ def reschedule_google_calendar_event(event_id: str, new_start_iso: str, new_end_
 def create_google_calendar_event(event):
     """Creates a new event on Google Calendar."""
     service = get_calendar_service()
+    calendar_timezone = get_primary_calendar_timezone(service)
 
-    start_dt = event.start_time if ("Z" in event.start_time or "+" in event.start_time) else f"{event.start_time}Z"
-    end_dt = event.end_time if ("Z" in event.end_time or "+" in event.end_time) else f"{event.end_time}Z"
+    start_dt = event.start_time
+    end_dt = event.end_time
 
     event_body = {
         'summary': event.event_name,
@@ -177,11 +188,11 @@ def create_google_calendar_event(event):
         'description': f'Created by AI Calendar Agent. Priority: {getattr(event, "priority", "Medium")}',
         'start': {
             'dateTime': start_dt,
-            'timeZone': 'UTC',
+            'timeZone': calendar_timezone,
         },
         'end': {
             'dateTime': end_dt,
-            'timeZone': 'UTC',
+            'timeZone': calendar_timezone,
         },
     }
 
