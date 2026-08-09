@@ -265,6 +265,20 @@ def is_quota_error(exc: Exception) -> bool:
     return any(term in message for term in ["quota", "resource_exhausted", "429"])
 
 
+def clean_agent_response(response) -> str:
+    """Return only visible text from Gemini content blocks."""
+    content = getattr(response, "content", response)
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("text"):
+                text_parts.append(block["text"])
+            elif isinstance(block, str):
+                text_parts.append(block)
+        return "\n".join(text_parts).strip()
+    return str(content)
+
+
 def run_calendar_without_llm(user_text: str) -> str:
     """Handle common calendar requests when Gemini quota is unavailable."""
     try:
@@ -330,17 +344,17 @@ def run_agent(user_text: str) -> str:
                 f"{system_prompt}\n\nUser request: {cleaned_input}\n"
                 "Respond clearly. If the request requires a calendar or Gmail action, explain the requested action."
             )
-            return response.content if hasattr(response, "content") else str(response)
+            return clean_agent_response(response)
         if USING_MODERN_CREATE_AGENT:
             res = agent_instance.invoke({"messages": [HumanMessage(content=cleaned_input)]})
             if isinstance(res, dict) and "messages" in res and res["messages"]:
-                return res["messages"][-1].content
-            return str(res)
+                return clean_agent_response(res["messages"][-1])
+            return clean_agent_response(res)
         else:
             res = agent_instance.invoke({"input": cleaned_input})
             if isinstance(res, dict):
-                return res.get("output", str(res))
-            return str(res)
+                return clean_agent_response(res.get("output", ""))
+            return clean_agent_response(res)
     except Exception as exc:
         if is_quota_error(exc):
             return run_calendar_without_llm(cleaned_input)
