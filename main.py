@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 import os
 import datetime
 import asyncio
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 import requests
@@ -41,6 +42,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ALLOWED_CHAT_ID = os.getenv("ALLOWED_CHAT_ID")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Saved after first user message
+CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE") or "Asia/Kolkata"
 PENDING_GMAIL_EVENTS = {}
 
 
@@ -102,7 +104,7 @@ def list_events(query: str = "") -> str:
     if calendar_service is None:
         return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
 
-    now = datetime.datetime.utcnow().isoformat() + 'Z'
+    now = datetime.datetime.now(ZoneInfo(CALENDAR_TIMEZONE)).astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
     events_result = calendar_service.events().list(
         calendarId='primary', timeMin=now,
         maxResults=10, singleEvents=True, orderBy='startTime'
@@ -115,6 +117,10 @@ def list_events(query: str = "") -> str:
     output = []
     for event in events:
         start = event['start'].get('dateTime', event['start'].get('date'))
+        if start and 'T' in start:
+            start = datetime.datetime.fromisoformat(start.replace('Z', '+00:00')).astimezone(
+                ZoneInfo(CALENDAR_TIMEZONE)
+            ).strftime('%Y-%m-%d %I:%M %p')
         output.append(f"ID: {event['id']} | Summary: {event.get('summary')} | Start: {start}")
     return "\n".join(output)
 
@@ -146,11 +152,11 @@ def create_event(details: str) -> str:
         
         event_body = {
             'summary': summary,
-            'start': {'dateTime': start_time},
-            'end': {'dateTime': end_time},
+            'start': {'dateTime': start_time, 'timeZone': CALENDAR_TIMEZONE},
+            'end': {'dateTime': end_time, 'timeZone': CALENDAR_TIMEZONE},
         }
         created = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
-        return f"✅ Event created successfully: '{created.get('summary')}' at {start_time}"
+        return f"✅ Event created successfully: '{created.get('summary')}' at {start_time} ({CALENDAR_TIMEZONE})"
     except Exception as e:
         return f"Error creating event: {str(e)}"
 
@@ -245,7 +251,12 @@ llm = ChatGoogleGenerativeAI(
     google_api_key=GEMINI_API_KEY,
     max_retries=3
 )
-system_prompt = "You are a helpful assistant for an AI calendar agent. Use the available tools to answer user requests about calendar events, Gmail invites, and scheduling."
+system_prompt = (
+    "You are a helpful assistant for an AI calendar agent. "
+    f"The user's timezone is {CALENDAR_TIMEZONE}. Always interpret and display event times in this timezone, "
+    "never UTC unless the user explicitly requests UTC. Use the available tools to answer user requests "
+    "about calendar events, Gmail messages, and scheduling."
+)
 
 if USING_MODERN_CREATE_AGENT:
     agent_instance = create_agent(model=llm, tools=tools, system_prompt=system_prompt)
