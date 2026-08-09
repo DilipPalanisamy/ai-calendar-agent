@@ -431,10 +431,20 @@ async def telegram_webhook(request: Request):
         TELEGRAM_CHAT_ID = chat_id
 
         normalized_text = user_text.lower()
-        if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"}:
+        if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"} or normalized_text.startswith("approve "):
             pending_events = PENDING_GMAIL_EVENTS.pop(chat_id, None)
             if not pending_events:
-                send_telegram_message(chat_id, "There is no Gmail event waiting for approval.")
+                try:
+                    messages = calendar_service_module.find_gmail_drive_or_internship_messages()
+                    pending_events = []
+                    for message in messages:
+                        email_text = f"{message['subject']}\n{message['snippet']}"
+                        pending_events.extend(parse_schedule_message(email_text, "Asia/Kolkata").events)
+                except Exception as exc:
+                    send_telegram_message(chat_id, f"❌ Could not recover the Gmail event: {exc}")
+                    return {"status": "ok"}
+            if not pending_events:
+                send_telegram_message(chat_id, "There is no unread Gmail event waiting for approval.")
                 return {"status": "ok"}
             links = [calendar_service_module.create_google_calendar_event(event) for event in pending_events]
             send_telegram_message(chat_id, "✅ Added the approved Gmail event(s) to Google Calendar.\n" + "\n".join(link for link in links if link))

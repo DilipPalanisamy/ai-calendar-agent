@@ -43,10 +43,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         chat_id = update.effective_chat.id
         normalized_text = user_text.strip().lower()
-        if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"}:
+        if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"} or normalized_text.startswith("approve "):
             pending_events = pending_gmail_events.pop(chat_id, None)
             if not pending_events:
-                await update.message.reply_text("There is no Gmail event waiting for approval.")
+                messages = find_gmail_drive_or_internship_messages()
+                pending_events = []
+                for message in messages:
+                    email_text = f"{message['subject']}\n{message['snippet']}"
+                    pending_events.extend(parse_schedule_message(email_text, "Asia/Kolkata").events)
+            if not pending_events:
+                await update.message.reply_text("There is no unread Gmail event waiting for approval.")
                 return
 
             links = [create_google_calendar_event(event) for event in pending_events]
