@@ -13,6 +13,7 @@ from calendar_service import (
     reschedule_google_calendar_event,
     get_primary_calendar_timezone,
     get_calendar_service,
+    find_gmail_drive_or_internship_messages,
 )
 
 load_dotenv()
@@ -21,6 +22,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+
+pending_gmail_events = {}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -38,6 +41,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Processing your request...")
 
     try:
+        chat_id = update.effective_chat.id
+        normalized_text = user_text.strip().lower()
+        if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"}:
+            pending_events = pending_gmail_events.pop(chat_id, None)
+            if not pending_events:
+                await update.message.reply_text("There is no Gmail event waiting for approval.")
+                return
+
+            links = [create_google_calendar_event(event) for event in pending_events]
+            await update.message.reply_text(
+                "✅ Added the approved Gmail event(s) to Google Calendar.\n"
+                + "\n".join(link for link in links if link)
+            )
+            return
+
+        if any(word in normalized_text for word in ["gmail", "email", "drive", "internship"]):
+            messages = find_gmail_drive_or_internship_messages()
+            if not messages:
+                await update.message.reply_text("No unread Drive or internship messages found in Gmail.")
+                return
+
+            pending_gmail_events[chat_id] = []
+            lines = ["📧 Gmail messages found (Drive/internship):"]
+            for message in messages:
+                email_text = f"{message['subject']}\n{message['snippet']}"
+                parsed_email = parse_schedule_message(email_text, "Asia/Kolkata")
+                pending_gmail_events[chat_id].extend(parsed_email.events)
+                lines.append(
+                    f"\nSubject: {message['subject']}\n"
+                    f"From: {message['from']}\n"
+                    f"Message: {message['snippet']}"
+                )
+            lines.append("\nReply 'approve' to add these detected event(s) to your calendar.")
+            await update.message.reply_text("\n".join(lines))
+            return
+
         parsed_data = parse_schedule_message(user_text)
         reply_lines = []
         calendar_timezone = get_primary_calendar_timezone(get_calendar_service())

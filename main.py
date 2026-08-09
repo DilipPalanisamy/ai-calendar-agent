@@ -41,6 +41,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ALLOWED_CHAT_ID = os.getenv("ALLOWED_CHAT_ID")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Saved after first user message
+PENDING_GMAIL_EVENTS = {}
 
 
 def get_gemini_model_candidates(preferred_model: str | None = None):
@@ -194,25 +195,31 @@ def update_event(details: str) -> str:
 # ---------------------------------------------------------
 
 def check_gmail_for_invites(query: str = "") -> str:
-    """Checks unread Gmail messages for tea/coffee invitations and returns details."""
+    """Checks unread Gmail messages for Drive or internship messages."""
     if creds is None:
         return "Google account is not authenticated yet. Please complete the sign-in flow to create token.json."
 
     try:
         gmail_service = build('gmail', 'v1', credentials=creds)
         results = gmail_service.users().messages().list(
-            userId='me', q='is:unread (tea OR coffee OR meetup)'
+            userId='me', q='is:unread (drive OR internship)'
         ).execute()
         
         messages = results.get('messages', [])
         if not messages:
-            return "No new tea or coffee invites found in Gmail."
+            return "No unread Drive or internship messages found in Gmail."
 
         invites = []
         for msg in messages[:5]:
             email = gmail_service.users().messages().get(userId='me', id=msg['id']).execute()
             snippet = email.get('snippet', '')
-            invites.append(f"Email ID: {msg['id']} | Content: {snippet}")
+            headers = {
+                header.get('name', '').lower(): header.get('value', '')
+                for header in email.get('payload', {}).get('headers', [])
+            }
+            invites.append(
+                f"Email ID: {msg['id']} | Subject: {headers.get('subject', 'No subject')} | Content: {snippet}"
+            )
 
         return "\n".join(invites)
     except Exception as e:
@@ -228,7 +235,7 @@ tools = [
     Tool(name="CreateEvent", func=create_event, description="Creates a new event. Format: 'Summary | StartISO | EndISO'"),
     Tool(name="DeleteEvent", func=delete_event, description="Deletes an event using its Event ID."),
     Tool(name="UpdateEvent", func=update_event, description="Updates an event. Format: 'EventID | Summary | StartISO | EndISO'"),
-    Tool(name="CheckGmailInvites", func=check_gmail_for_invites, description="Checks unread Gmail messages for tea, coffee, or meetup invitations.")
+    Tool(name="CheckGmailInvites", func=check_gmail_for_invites, description="Checks unread Gmail messages for Drive or internship messages.")
 ]
 
 DEFAULT_GEMINI_MODEL = get_gemini_model_candidates()[0]
@@ -370,12 +377,27 @@ async def check_upcoming_reminders():
 
 
 async def auto_scan_tea_invites():
-    """Checks Gmail every 15 minutes for new tea invites."""
+    """Checks Gmail every 15 minutes for Drive or internship messages."""
     if not TELEGRAM_CHAT_ID:
         return
-    invites = check_gmail_for_invites()
-    if "No new" not in invites and "Error" not in invites:
-        send_telegram_message(TELEGRAM_CHAT_ID, f"☕ **New Invitation Detected in Gmail:**\n\n{invites}")
+    try:
+        messages = calendar_service_module.find_gmail_drive_or_internship_messages()
+    except Exception as exc:
+        send_telegram_message(TELEGRAM_CHAT_ID, f"❌ Could not read Gmail: {exc}")
+        return
+
+    if not messages:
+        return
+
+    PENDING_GMAIL_EVENTS[TELEGRAM_CHAT_ID] = []
+    lines = ["📧 **New Drive/internship message detected in Gmail:**"]
+    for message in messages:
+        email_text = f"{message['subject']}\n{message['snippet']}"
+        parsed_email = parse_schedule_message(email_text, "Asia/Kolkata")
+        PENDING_GMAIL_EVENTS[TELEGRAM_CHAT_ID].extend(parsed_email.events)
+        lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['snippet']}")
+    lines.append("\nReply 'approve' after reviewing it to add it to the calendar.")
+    send_telegram_message(TELEGRAM_CHAT_ID, "\n".join(lines))
 
 
 async def send_daily_briefing():
@@ -407,6 +429,37 @@ async def telegram_webhook(request: Request):
             return {"status": "unauthorized"}
         
         TELEGRAM_CHAT_ID = chat_id
+
+        normalized_text = user_text.lower()
+        if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"}:
+            pending_events = PENDING_GMAIL_EVENTS.pop(chat_id, None)
+            if not pending_events:
+                send_telegram_message(chat_id, "There is no Gmail event waiting for approval.")
+                return {"status": "ok"}
+            links = [calendar_service_module.create_google_calendar_event(event) for event in pending_events]
+            send_telegram_message(chat_id, "✅ Added the approved Gmail event(s) to Google Calendar.\n" + "\n".join(link for link in links if link))
+            return {"status": "ok"}
+
+        if any(word in normalized_text for word in ["gmail", "email", "drive", "internship"]):
+            try:
+                messages = calendar_service_module.find_gmail_drive_or_internship_messages()
+            except Exception as exc:
+                send_telegram_message(chat_id, f"❌ Could not read Gmail: {exc}")
+                return {"status": "ok"}
+            if not messages:
+                send_telegram_message(chat_id, "No unread Drive or internship messages found in Gmail.")
+                return {"status": "ok"}
+
+            PENDING_GMAIL_EVENTS[chat_id] = []
+            lines = ["📧 Gmail messages found (Drive/internship):"]
+            for message in messages:
+                email_text = f"{message['subject']}\n{message['snippet']}"
+                parsed_email = parse_schedule_message(email_text, "Asia/Kolkata")
+                PENDING_GMAIL_EVENTS[chat_id].extend(parsed_email.events)
+                lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['snippet']}")
+            lines.append("\nReply 'approve' to add these detected event(s) to your calendar.")
+            send_telegram_message(chat_id, "\n".join(lines))
+            return {"status": "ok"}
 
         # Welcome Response
         if user_text.lower() in ["/start", "/help", "hi", "hello"]:

@@ -96,9 +96,45 @@ def get_calendar_service():
     return build('calendar', 'v3', credentials=creds)
 
 
+def get_gmail_service():
+    """Return an authenticated Gmail API client using the shared credentials."""
+    creds = get_google_credentials()
+    return build('gmail', 'v1', credentials=creds)
+
+
+def find_gmail_drive_or_internship_messages(max_results: int = 5) -> list:
+    """Find recent unread Gmail messages about Drive files or internships."""
+    service = get_gmail_service()
+    response = service.users().messages().list(
+        userId='me',
+        q='is:unread (drive OR internship)',
+        maxResults=max_results,
+    ).execute()
+
+    messages = []
+    for message in response.get('messages', []):
+        email = service.users().messages().get(
+            userId='me',
+            id=message['id'],
+            format='full',
+        ).execute()
+        headers = {
+            header.get('name', '').lower(): header.get('value', '')
+            for header in email.get('payload', {}).get('headers', [])
+        }
+        messages.append({
+            'id': message['id'],
+            'subject': headers.get('subject', 'No subject'),
+            'from': headers.get('from', 'Unknown sender'),
+            'date': headers.get('date', ''),
+            'snippet': email.get('snippet', ''),
+        })
+    return messages
+
+
 def get_primary_calendar_timezone(service) -> str:
     """Returns the primary Google Calendar timezone used for local event times."""
-    configured_timezone = os.getenv('CALENDAR_TIMEZONE')
+    configured_timezone = os.getenv('CALENDAR_TIMEZONE') or 'Asia/Kolkata'
     if configured_timezone:
         return configured_timezone
 

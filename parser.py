@@ -154,7 +154,7 @@ def _fallback_parse_single(part_text: str, user_timezone: str = "UTC") -> Calend
 
 
 def _fallback_parse(message_text: str, user_timezone: str | None = None) -> MultiCalendarEvents:
-    user_timezone = user_timezone or os.getenv("CALENDAR_TIMEZONE") or "UTC"
+    user_timezone = user_timezone or os.getenv("CALENDAR_TIMEZONE") or "Asia/Kolkata"
     cleaned_text = re.sub(r"\s+", " ", message_text).strip()
     parts = re.split(r"\s+and\s+|,", cleaned_text, flags=re.IGNORECASE)
     events = [_fallback_parse_single(part, user_timezone) for part in parts if part.strip()]
@@ -162,7 +162,7 @@ def _fallback_parse(message_text: str, user_timezone: str | None = None) -> Mult
 
 
 def parse_schedule_message(message_text: str, user_timezone: str | None = None) -> MultiCalendarEvents:
-    user_timezone = user_timezone or os.getenv("CALENDAR_TIMEZONE") or "UTC"
+    user_timezone = user_timezone or os.getenv("CALENDAR_TIMEZONE") or "Asia/Kolkata"
     if structured_llm is None:
         return _fallback_parse(message_text, user_timezone)
 
