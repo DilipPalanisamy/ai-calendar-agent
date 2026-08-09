@@ -128,6 +128,7 @@ def find_gmail_drive_or_internship_messages(max_results: int = 5) -> list:
             'from': headers.get('from', 'Unknown sender'),
             'date': headers.get('date', ''),
             'snippet': email.get('snippet', ''),
+            'display_snippet': ' '.join(email.get('snippet', '').split())[:280],
         })
     return messages
 

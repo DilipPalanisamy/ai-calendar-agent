@@ -217,8 +217,9 @@ def check_gmail_for_invites(query: str = "") -> str:
                 header.get('name', '').lower(): header.get('value', '')
                 for header in email.get('payload', {}).get('headers', [])
             }
+            short_snippet = ' '.join(snippet.split())[:280]
             invites.append(
-                f"Email ID: {msg['id']} | Subject: {headers.get('subject', 'No subject')} | Content: {snippet}"
+                f"Email ID: {msg['id']} | Subject: {headers.get('subject', 'No subject')} | Content: {short_snippet}"
             )
 
         return "\n".join(invites)
@@ -395,7 +396,7 @@ async def auto_scan_tea_invites():
         email_text = f"{message['subject']}\n{message['snippet']}"
         parsed_email = parse_schedule_message(email_text, "Asia/Kolkata")
         PENDING_GMAIL_EVENTS[TELEGRAM_CHAT_ID].extend(parsed_email.events)
-        lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['snippet']}")
+        lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['display_snippet']}")
     lines.append("\nReply 'approve' after reviewing it to add it to the calendar.")
     send_telegram_message(TELEGRAM_CHAT_ID, "\n".join(lines))
 
@@ -466,7 +467,7 @@ async def telegram_webhook(request: Request):
                 email_text = f"{message['subject']}\n{message['snippet']}"
                 parsed_email = parse_schedule_message(email_text, "Asia/Kolkata")
                 PENDING_GMAIL_EVENTS[chat_id].extend(parsed_email.events)
-                lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['snippet']}")
+                lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['display_snippet']}")
             lines.append("\nReply 'approve' to add these detected event(s) to your calendar.")
             send_telegram_message(chat_id, "\n".join(lines))
             return {"status": "ok"}

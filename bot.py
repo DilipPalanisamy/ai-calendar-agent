@@ -77,7 +77,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 lines.append(
                     f"\nSubject: {message['subject']}\n"
                     f"From: {message['from']}\n"
-                    f"Message: {message['snippet']}"
+                    f"Message: {message['display_snippet']}"
                 )
             lines.append("\nReply 'approve' to add these detected event(s) to your calendar.")
             await update.message.reply_text("\n".join(lines))
