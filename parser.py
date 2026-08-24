@@ -32,7 +32,7 @@ def get_gemini_model_candidates(preferred_model: str | None = None):
 
 
 class CalendarEvent(BaseModel):
-    action: str = Field(default="CREATE", description="Action type: 'CREATE', 'DELETE', 'RESCHEDULE', or 'LIST'")
+    action: str = Field(default="CREATE", description="Action type: 'CREATE', 'DELETE', 'RESCHEDULE', 'LIST', or 'LINK'")
     event_name: str = Field(description="The title or query summary of the target event")
     start_time: str = Field(default="", description="Start time in ISO format YYYY-MM-DDTHH:MM:SS")
     end_time: str = Field(default="", description="End time in ISO format YYYY-MM-DDTHH:MM:SS")
@@ -126,9 +126,17 @@ def _resolve_date(message_text: str, user_timezone: str):
 
 
 def _fallback_parse_single(part_text: str, user_timezone: str = "Asia/Kolkata") -> CalendarEvent:
-    lower_text = part_text.lower()
+    lower_text = part_text.lower().strip()
     action = "CREATE"
     
+    # Check for link / URL request
+    if any(phrase in lower_text for phrase in ["link", "url", "calendar link", "open calendar", "google calendar link", "calender link"]):
+        if not any(time_word in lower_text for time_word in [" at ", " pm", " am", ":", "tomorrow", "today", "schedule", "delete", "cancel"]):
+            return CalendarEvent(
+                action="LINK",
+                event_name="Google Calendar Link",
+            )
+
     if any(word in lower_text for word in ["cancel", "delete", "remove"]):
         action = "DELETE"
     elif any(word in lower_text for word in ["reschedule", "move", "postpone", "shift"]):
@@ -196,7 +204,10 @@ def parse_schedule_message(message_text: str, user_timezone: str | None = None) 
     User Timezone: {user_timezone}
 
     Strict Guidelines:
-    - Set 'action' to 'CREATE', 'DELETE', 'RESCHEDULE', or 'LIST'.
+    - Set 'action' to 'CREATE', 'DELETE', 'RESCHEDULE', 'LIST', or 'LINK'.
+    - For LINK actions (e.g. "Send calendar link", "give me calendar link", "open calendar", "link", "google calendar link", "where is my calendar"):
+        * Set 'action' to 'LINK'.
+        * Set 'event_name' to "Google Calendar Link".
     - Output 'start_time' and 'end_time' strictly in naive ISO format YYYY-MM-DDTHH:MM:SS corresponding to the User Timezone ({user_timezone}). Do NOT add 'Z' and do NOT add UTC offsets (+00:00).
     - For CREATE actions:
         * Map 12-hour times (e.g. '2 pm' -> 14:00, '9:30 am' -> 09:30, '4 pm' -> 16:00).

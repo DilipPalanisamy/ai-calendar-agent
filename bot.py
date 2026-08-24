@@ -27,6 +27,7 @@ logging.basicConfig(
 )
 
 pending_gmail_events = {}
+GOOGLE_CALENDAR_URL = "https://calendar.google.com/calendar/r"
 
 
 def format_display_time(start_iso: str, end_iso: str, timezone_name: str) -> str:
@@ -67,6 +68,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👉 **Rescheduling:** 'Move meeting with Dilip to 4pm'\n"
         "👉 **Deleting:** 'Cancel meeting with Dilip'\n"
         "👉 **Listing:** 'What is on my schedule today?'\n"
+        "👉 **Calendar Link:** 'Send calendar link' or /link\n"
+    )
+
+
+async def send_calendar_link(update: Update, context: ContextTypes.DEFAULT_TYPE = None):
+    """Replies directly with the Google Calendar web link."""
+    await update.message.reply_markdown(
+        "📅 **Your Google Calendar Link:**\n\n"
+        f"🔗 [Open Google Calendar]({GOOGLE_CALENDAR_URL})\n\n"
+        f"Direct URL: {GOOGLE_CALENDAR_URL}"
     )
 
 
@@ -80,6 +91,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         calendar_timezone = get_primary_calendar_timezone(calendar_service)
         
         normalized_text = user_text.strip().lower()
+
+        # Direct check for calendar link requests
+        link_triggers = ["link", "/link", "/calendar", "calendar link", "google calendar link", "calender link", "calendar url", "open calendar", "show calendar", "give me calendar link", "where is my calendar", "my calendar link"]
+        if normalized_text in {"link", "calendar link", "calender link", "calender", "calendar", "/link", "/calendar"} or any(phrase in normalized_text for phrase in link_triggers):
+            if not any(sched_word in normalized_text for sched_word in [" at ", "tomorrow", "today", " pm", " am", "schedule", "delete", "cancel", "reschedule", "move "]):
+                await send_calendar_link(update, context)
+                return
+
         if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"} or normalized_text.startswith("approve "):
             pending_events = pending_gmail_events.pop(chat_id, None)
             if not pending_events:
@@ -126,8 +145,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for event in parsed_data.events:
             action = getattr(event, 'action', 'CREATE').upper()
 
+            # --- LINK ACTION ---
+            if action == "LINK":
+                reply_lines.append(
+                    "📅 **Your Google Calendar Link:**\n\n"
+                    f"🔗 [Open Google Calendar]({GOOGLE_CALENDAR_URL})\n\n"
+                    f"Direct URL: {GOOGLE_CALENDAR_URL}"
+                )
+
             # --- DELETE ACTION ---
-            if action == "DELETE":
+            elif action == "DELETE":
                 target_event = find_event_by_title(event.event_name)
                 if target_event and delete_google_calendar_event(target_event['id']):
                     reply_lines.append(f"🗑️ **Deleted Event:** '{target_event.get('summary', event.event_name)}'")
@@ -184,6 +211,8 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('link', send_calendar_link))
+    app.add_handler(CommandHandler('calendar', send_calendar_link))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
     print("🤖 Telegram Bot is running! Press Ctrl+C to stop.")

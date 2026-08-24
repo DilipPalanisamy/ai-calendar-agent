@@ -43,6 +43,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ALLOWED_CHAT_ID = os.getenv("ALLOWED_CHAT_ID")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Saved after first user message
 CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE") or "Asia/Kolkata"
+GOOGLE_CALENDAR_URL = "https://calendar.google.com/calendar/r"
 PENDING_GMAIL_EVENTS = {}
 
 
@@ -104,6 +105,11 @@ except Exception as exc:  # pragma: no cover - runtime fallback
 # ---------------------------------------------------------
 # 📅 GOOGLE CALENDAR TOOLS & CONFLICT DETECTION
 # ---------------------------------------------------------
+
+def get_calendar_link(query: str = "") -> str:
+    """Returns the Google Calendar web URL to view and manage events."""
+    return f"📅 Google Calendar Link: {GOOGLE_CALENDAR_URL}"
+
 
 def list_events(query: str = "") -> str:
     """Lists events for today or upcoming days in the configured timezone."""
@@ -250,6 +256,7 @@ def check_gmail_for_invites(query: str = "") -> str:
 # ---------------------------------------------------------
 
 tools = [
+    Tool(name="GetCalendarLink", func=get_calendar_link, description="Returns the Google Calendar web URL to view and manage events."),
     Tool(name="ListEvents", func=list_events, description="Lists upcoming calendar events."),
     Tool(name="CreateEvent", func=create_event, description="Creates a new event. Format: 'Summary | StartISO | EndISO'"),
     Tool(name="DeleteEvent", func=delete_event, description="Deletes an event using its Event ID."),
@@ -267,7 +274,7 @@ system_prompt = (
     "You are a helpful assistant for an AI calendar agent. "
     f"The user's timezone is {CALENDAR_TIMEZONE}. Always interpret and display event times in this timezone, "
     "never UTC unless the user explicitly requests UTC. Use the available tools to answer user requests "
-    "about calendar events, Gmail messages, and scheduling."
+    "about calendar events, Gmail messages, calendar links, and scheduling."
 )
 
 if USING_MODERN_CREATE_AGENT:
@@ -310,7 +317,9 @@ def run_calendar_without_llm(user_text: str) -> str:
 
         for event in parsed_data.events:
             action = event.action.upper()
-            if action == "CREATE":
+            if action == "LINK":
+                replies.append(f"📅 Google Calendar Link:\n{GOOGLE_CALENDAR_URL}")
+            elif action == "CREATE":
                 conflicts = calendar_service_module.check_calendar_conflict(
                     event.start_time, event.end_time
                 )
@@ -468,6 +477,14 @@ async def telegram_webhook(request: Request):
         TELEGRAM_CHAT_ID = chat_id
 
         normalized_text = user_text.lower()
+
+        # Check for calendar link requests
+        link_triggers = ["link", "/link", "/calendar", "calendar link", "google calendar link", "calender link", "calendar url", "open calendar", "show calendar", "give me calendar link", "where is my calendar", "my calendar link"]
+        if normalized_text in {"link", "calendar link", "calender link", "calender", "calendar", "/link", "/calendar"} or any(phrase in normalized_text for phrase in link_triggers):
+            if not any(sched_word in normalized_text for sched_word in [" at ", "tomorrow", "today", " pm", " am", "schedule", "delete", "cancel", "reschedule", "move "]):
+                send_telegram_message(chat_id, f"📅 **Your Google Calendar Link:**\n\n🔗 {GOOGLE_CALENDAR_URL}")
+                return {"status": "ok"}
+
         if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"} or normalized_text.startswith("approve "):
             pending_events = PENDING_GMAIL_EVENTS.pop(chat_id, None)
             if not pending_events:
@@ -514,6 +531,7 @@ async def telegram_webhook(request: Request):
                 "👋 **Welcome to your AI Calendar Assistant!**\n\n"
                 "• 📅 View schedule: *'What is on my schedule today?'*\n"
                 "• ➕ Add event: *'Schedule tea tomorrow at 4 PM'*\n"
+                "• 🔗 Calendar link: *'Send calendar link'* or /link\n"
                 "• ☕ Scan Gmail: *'Check my emails for tea invites'*\n"
                 "• 🗑️ Delete event: *'Delete event [Event ID]'"
             )
