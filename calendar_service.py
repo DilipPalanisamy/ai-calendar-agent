@@ -93,7 +93,8 @@ def get_google_credentials():
 
 def get_calendar_service():
     creds = get_google_credentials()
-    return build('calendar', 'v3', credentials=creds)
+    service = build('calendar', 'v3', credentials=creds)
+    return service
 
 
 def get_gmail_service():
@@ -133,25 +134,88 @@ def find_gmail_drive_or_internship_messages(max_results: int = 5) -> list:
     return messages
 
 
-def get_primary_calendar_timezone(service) -> str:
+def get_primary_calendar_timezone(service=None) -> str:
     """Returns the primary Google Calendar timezone used for local event times."""
-    configured_timezone = os.getenv('CALENDAR_TIMEZONE') or 'Asia/Kolkata'
+    configured_timezone = os.getenv('CALENDAR_TIMEZONE')
     if configured_timezone:
         return configured_timezone
 
-    calendar = service.calendarList().get(calendarId='primary').execute()
-    return calendar.get('timeZone', 'UTC')
+    if service is not None:
+        try:
+            calendar = service.calendarList().get(calendarId='primary').execute()
+            tz = calendar.get('timeZone')
+            if tz:
+                return tz
+        except Exception:
+            pass
+
+    return 'Asia/Kolkata'
+
+
+def sync_calendar_timezone(service=None, target_timezone: str = None) -> str:
+    """Ensures Google Calendar primary calendar timezone matches target timezone."""
+    timezone_name = target_timezone or os.getenv('CALENDAR_TIMEZONE') or 'Asia/Kolkata'
+    if service is None:
+        service = get_calendar_service()
+
+    try:
+        # Patch primary calendar entry
+        cal_list = service.calendarList().list().execute()
+        for cal in cal_list.get('items', []):
+            if cal.get('primary'):
+                cal_id = cal.get('id')
+                if cal.get('timeZone') != timezone_name:
+                    service.calendarList().patch(calendarId=cal_id, body={'timeZone': timezone_name}).execute()
+                    try:
+                        service.calendars().patch(calendarId=cal_id, body={'timeZone': timezone_name}).execute()
+                    except Exception:
+                        pass
+                return timezone_name
+    except Exception:
+        pass
+    return timezone_name
+
+
+def _format_rfc3339_with_tz(iso_value: str, timezone_name: str) -> str:
+    """Ensure the datetime string is in RFC3339 format with the target timezone offset."""
+    if not iso_value:
+        return iso_value
+
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz = ZoneInfo('Asia/Kolkata')
+
+    clean_str = str(iso_value).strip()
+    if clean_str.endswith('Z'):
+        dt = datetime.datetime.fromisoformat(clean_str.replace('Z', '+00:00'))
+        dt = dt.astimezone(tz)
+    elif len(clean_str) > 10 and ('+' in clean_str[10:] or '-' in clean_str[10:]):
+        dt = datetime.datetime.fromisoformat(clean_str)
+        dt = dt.astimezone(tz)
+    else:
+        dt = datetime.datetime.fromisoformat(clean_str)
+        dt = dt.replace(tzinfo=tz)
+
+    return dt.isoformat()
 
 
 def _api_time(iso_value: str, timezone_name: str) -> str:
-    """Convert a naive local ISO time to the UTC format expected by Calendar queries."""
-    if "Z" in iso_value or "+" in iso_value:
-        return iso_value
+    """Convert any local or ISO time string to UTC RFC3339 format for Calendar API queries."""
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz = ZoneInfo('Asia/Kolkata')
 
-    local_dt = datetime.datetime.fromisoformat(iso_value).replace(
-        tzinfo=ZoneInfo(timezone_name)
-    )
-    return local_dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    clean_str = str(iso_value).strip()
+    if clean_str.endswith('Z'):
+        dt = datetime.datetime.fromisoformat(clean_str.replace('Z', '+00:00'))
+    elif len(clean_str) > 10 and ('+' in clean_str[10:] or '-' in clean_str[10:]):
+        dt = datetime.datetime.fromisoformat(clean_str)
+    else:
+        dt = datetime.datetime.fromisoformat(clean_str).replace(tzinfo=tz)
+
+    return dt.astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
 def check_calendar_conflict(start_time_iso: str, end_time_iso: str) -> list:
@@ -184,7 +248,7 @@ def find_event_by_title(title_query: str, time_min_iso: str = None) -> dict:
     clean_query = re.sub(r"\b(tomorrow|today|next\s+\w+)\b", "", title_query, flags=re.IGNORECASE).strip()
 
     if not time_min_iso:
-        time_min_iso = datetime.datetime.utcnow().isoformat() + "Z"
+        time_min_iso = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
     else:
         time_min_iso = _api_time(time_min_iso, calendar_timezone)
 
@@ -215,10 +279,13 @@ def reschedule_google_calendar_event(event_id: str, new_start_iso: str, new_end_
     service = get_calendar_service()
     calendar_timezone = get_primary_calendar_timezone(service)
 
+    start_dt = _format_rfc3339_with_tz(new_start_iso, calendar_timezone)
+    end_dt = _format_rfc3339_with_tz(new_end_iso, calendar_timezone)
+
     event = service.events().get(calendarId='primary', eventId=event_id).execute()
-    event['start']['dateTime'] = new_start_iso
+    event['start']['dateTime'] = start_dt
     event['start']['timeZone'] = calendar_timezone
-    event['end']['dateTime'] = new_end_iso
+    event['end']['dateTime'] = end_dt
     event['end']['timeZone'] = calendar_timezone
 
     updated_event = service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
@@ -226,12 +293,16 @@ def reschedule_google_calendar_event(event_id: str, new_start_iso: str, new_end_
 
 
 def create_google_calendar_event(event):
-    """Creates a new event on Google Calendar."""
+    """Creates a new event on Google Calendar with localized RFC3339 timestamps."""
+    # If a MultiCalendarEvents wrapper was passed, take the first event
+    if hasattr(event, 'events') and event.events:
+        event = event.events[0]
+
     service = get_calendar_service()
     calendar_timezone = get_primary_calendar_timezone(service)
 
-    start_dt = event.start_time
-    end_dt = event.end_time
+    start_dt = _format_rfc3339_with_tz(event.start_time, calendar_timezone)
+    end_dt = _format_rfc3339_with_tz(event.end_time, calendar_timezone)
 
     event_body = {
         'summary': event.event_name,

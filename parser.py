@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
@@ -56,27 +56,53 @@ else:
 
 
 def _parse_time_value(text: str):
-    match = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", text, re.IGNORECASE)
-    if not match:
-        return None
+    """Accurately extract start hour and minute from natural text."""
+    # 1. Look for explicit am/pm patterns: e.g. "at 2 pm", "2:30pm", "3 pm"
+    match_ampm = re.search(r"\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", text, re.IGNORECASE)
+    if match_ampm:
+        hour = int(match_ampm.group(1))
+        minute = int(match_ampm.group(2) or "0")
+        suffix = match_ampm.group(3).lower()
+        if suffix == "pm" and hour < 12:
+            hour += 12
+        elif suffix == "am" and hour == 12:
+            hour = 0
+        return hour, minute
 
-    hour = int(match.group(1))
-    minute = int(match.group(2) or "0")
-    suffix = (match.group(3) or "").lower()
+    # 2. Look for 24-hour / colon time: e.g. "14:30", "09:00"
+    match_colon = re.search(r"\b(\d{1,2}):(\d{2})\b", text)
+    if match_colon:
+        hour = int(match_colon.group(1))
+        minute = int(match_colon.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
 
-    if suffix == "pm" and hour < 12:
-        hour += 12
-    if suffix == "am" and hour == 12:
-        hour = 0
+    # 3. Look for "at <number>": e.g. "at 2", "at 14"
+    match_at = re.search(r"\bat\s+(\d{1,2})\b", text, re.IGNORECASE)
+    if match_at:
+        hour = int(match_at.group(1))
+        minute = 0
+        # If hour is between 1 and 7, assume PM for typical business meetings (e.g. 2 -> 14:00)
+        if 1 <= hour <= 7:
+            hour += 12
+        return hour, minute
 
-    return hour, minute
+    # 4. Look for standalone time indicators
+    match_any = re.search(r"\b(\d{1,2})\s*(?:o'?clock)\b", text, re.IGNORECASE)
+    if match_any:
+        hour = int(match_any.group(1))
+        if 1 <= hour <= 7:
+            hour += 12
+        return hour, 0
+
+    return None
 
 
 def _get_timezone(timezone_name: str) -> ZoneInfo:
     try:
         return ZoneInfo(timezone_name)
     except Exception:
-        return ZoneInfo("UTC")
+        return ZoneInfo("Asia/Kolkata")
 
 
 def _resolve_date(message_text: str, user_timezone: str):
@@ -90,16 +116,16 @@ def _resolve_date(message_text: str, user_timezone: str):
 
     weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
     for idx, day_name in enumerate(weekdays):
-        if f"next {day_name}" in lower:
+        if re.search(rf"\b(?:next\s+|this\s+|on\s+)?{day_name}\b", lower):
             days_ahead = (idx - today.weekday() + 7) % 7
-            if days_ahead == 0:
+            if days_ahead == 0 and ("next" in lower or "tomorrow" in lower):
                 days_ahead = 7
             return today + timedelta(days=days_ahead)
 
     return today
 
 
-def _fallback_parse_single(part_text: str, user_timezone: str = "UTC") -> CalendarEvent:
+def _fallback_parse_single(part_text: str, user_timezone: str = "Asia/Kolkata") -> CalendarEvent:
     lower_text = part_text.lower()
     action = "CREATE"
     
@@ -113,8 +139,8 @@ def _fallback_parse_single(part_text: str, user_timezone: str = "UTC") -> Calend
     date_value = _resolve_date(part_text, user_timezone)
     
     if action == "LIST":
-        start_dt = datetime.combine(date_value, datetime.min.time())
-        end_dt = datetime.combine(date_value, datetime.max.time().replace(microsecond=0))
+        start_dt = datetime.combine(date_value, time.min)
+        end_dt = datetime.combine(date_value, time.max.replace(microsecond=0))
         return CalendarEvent(
             action="LIST",
             event_name="Schedule Query",
@@ -124,24 +150,20 @@ def _fallback_parse_single(part_text: str, user_timezone: str = "UTC") -> Calend
 
     time_value = _parse_time_value(part_text)
     start_hour, start_minute = time_value if time_value else (9, 0)
-    end_hour, end_minute = start_hour, start_minute + 30
-    if end_minute >= 60:
-        end_hour += 1
-        end_minute -= 60
+    
+    start_dt = datetime.combine(date_value, time(hour=start_hour, minute=start_minute))
+    end_dt = start_dt + timedelta(minutes=30)
 
     cleaned_name = re.sub(
-        r"\b(tomorrow|today|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b",
+        r"\b(tomorrow|today|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|this\s+\w+|on\s+\w+)\b",
         "",
         part_text,
         flags=re.IGNORECASE,
     )
-    cleaned_name = re.sub(r"\b(at|on|schedule|cancel|delete|remove|reschedule|move|to)\b", "", cleaned_name, flags=re.IGNORECASE)
-    cleaned_name = re.sub(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b", "", cleaned_name, flags=re.IGNORECASE)
+    cleaned_name = re.sub(r"\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b", "", cleaned_name, flags=re.IGNORECASE)
+    cleaned_name = re.sub(r"\b(schedule|cancel|delete|remove|reschedule|move|to|at|on|for)\b", "", cleaned_name, flags=re.IGNORECASE)
     cleaned_name = re.sub(r"\s+", " ", cleaned_name).strip(" -:")
     event_name = cleaned_name or "Scheduled Event"
-
-    start_dt = datetime.combine(date_value, datetime.min.time()).replace(hour=start_hour, minute=start_minute)
-    end_dt = datetime.combine(date_value, datetime.min.time()).replace(hour=end_hour, minute=end_minute)
 
     return CalendarEvent(
         action=action,
@@ -166,23 +188,33 @@ def parse_schedule_message(message_text: str, user_timezone: str | None = None) 
     if structured_llm is None:
         return _fallback_parse(message_text, user_timezone)
 
+    now_local = datetime.now(_get_timezone(user_timezone))
     prompt = f"""
-    You are an expert scheduling assistant. Extract ALL intent operations mentioned in the message.
+    You are an expert scheduling assistant. Extract ALL calendar intent operations mentioned in the message.
 
-    Current Date: {datetime.now(_get_timezone(user_timezone)).date().isoformat()}
+    Current Reference Time: {now_local.strftime('%Y-%m-%d %H:%M:%S')} ({now_local.strftime('%A')})
     User Timezone: {user_timezone}
 
-    Guidelines:
+    Strict Guidelines:
     - Set 'action' to 'CREATE', 'DELETE', 'RESCHEDULE', or 'LIST'.
-    - For LIST actions (e.g. "What's on my schedule for tomorrow?", "Show my meetings today"):
-        * Set 'start_time' to the beginning of the requested day (e.g., 2026-08-06T00:00:00).
-        * Set 'end_time' to the end of the requested day (e.g., 2026-08-06T23:59:59).
+    - Output 'start_time' and 'end_time' strictly in naive ISO format YYYY-MM-DDTHH:MM:SS corresponding to the User Timezone ({user_timezone}). Do NOT add 'Z' and do NOT add UTC offsets (+00:00).
+    - For CREATE actions:
+        * Map 12-hour times (e.g. '2 pm' -> 14:00, '9:30 am' -> 09:30, '4 pm' -> 16:00).
+        * If time of day is ambiguous like 'at 2', interpret as 2 PM (14:00) during daytime business hours.
+        * Default duration to 30 minutes if end_time is not given.
+        * If no date is given (e.g. 'meeting with dilp at 2 pm'):
+          - If the requested time is still upcoming today, use today's date ({now_local.date().isoformat()}).
+          - If the requested time has already passed today, use tomorrow's date.
+        * For 'event_name', extract a clean, concise title string (e.g. 'Meeting with Dilip' or 'meeting with dilp').
+    - For LIST actions (e.g. "What's on my schedule today?", "Show meetings for tomorrow"):
+        * Set 'start_time' to the beginning of the requested day (e.g., YYYY-MM-DDT00:00:00).
+        * Set 'end_time' to the end of the requested day (e.g., YYYY-MM-DDT23:59:59).
         * Set 'event_name' to "Schedule Query".
     - For DELETE actions:
-        * Extract ONLY the clean title string into 'event_name' (e.g., for "Cancel client call tomorrow", event_name should be "client call").
-        * Calculate 'start_time' for the day referenced so search is localized.
-    - For RESCHEDULE actions, extract clean target event_name and the new start_time / end_time.
-    - For CREATE actions, default duration to 30 minutes if end_time is not given.
+        * Extract ONLY the clean event title into 'event_name'.
+        * Set 'start_time' for the day referenced so search is localized.
+    - For RESCHEDULE actions:
+        * Extract clean target event_name and the new start_time / end_time in User Timezone.
 
     User Message: "{message_text}"
     """

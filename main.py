@@ -69,7 +69,13 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Schedule background tasks
+    # Startup: Schedule background tasks and sync calendar timezone
+    try:
+        if calendar_service is not None:
+            calendar_service_module.sync_calendar_timezone(calendar_service, CALENDAR_TIMEZONE)
+    except Exception as exc:
+        print(f"Warning: Could not sync calendar timezone on startup: {exc}")
+
     scheduler.add_job(check_upcoming_reminders, 'interval', minutes=5)
     scheduler.add_job(auto_scan_tea_invites, 'interval', minutes=15)
     scheduler.add_job(send_daily_briefing, 'cron', hour=8, minute=0)
@@ -100,7 +106,7 @@ except Exception as exc:  # pragma: no cover - runtime fallback
 # ---------------------------------------------------------
 
 def list_events(query: str = "") -> str:
-    """Lists events for today or upcoming days."""
+    """Lists events for today or upcoming days in the configured timezone."""
     if calendar_service is None:
         return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
 
@@ -118,10 +124,16 @@ def list_events(query: str = "") -> str:
     for event in events:
         start = event['start'].get('dateTime', event['start'].get('date'))
         if start and 'T' in start:
-            start = datetime.datetime.fromisoformat(start.replace('Z', '+00:00')).astimezone(
-                ZoneInfo(CALENDAR_TIMEZONE)
-            ).strftime('%Y-%m-%d %I:%M %p')
-        output.append(f"ID: {event['id']} | Summary: {event.get('summary')} | Start: {start}")
+            start_clean = start.replace('Z', '+00:00')
+            start_dt = datetime.datetime.fromisoformat(start_clean)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=ZoneInfo(CALENDAR_TIMEZONE))
+            else:
+                start_dt = start_dt.astimezone(ZoneInfo(CALENDAR_TIMEZONE))
+            start_formatted = start_dt.strftime('%Y-%m-%d %I:%M %p')
+        else:
+            start_formatted = start
+        output.append(f"ID: {event['id']} | Summary: {event.get('summary')} | Start: {start_formatted}")
     return "\n".join(output)
 
 
@@ -129,26 +141,23 @@ def create_event(details: str) -> str:
     """
     Creates an event with conflict detection.
     Expects input format: 'Summary | StartISO | EndISO'
-    Example: 'Team Sync | 2026-08-06T10:00:00Z | 2026-08-06T11:00:00Z'
+    Example: 'Team Sync | 2026-08-06T10:00:00 | 2026-08-06T11:00:00'
     """
     if calendar_service is None:
         return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
 
     try:
         parts = [p.strip() for p in details.split('|')]
-        summary, start_time, end_time = parts[0], parts[1], parts[2]
+        summary, raw_start, raw_end = parts[0], parts[1], parts[2]
         
+        start_time = calendar_service_module._format_rfc3339_with_tz(raw_start, CALENDAR_TIMEZONE)
+        end_time = calendar_service_module._format_rfc3339_with_tz(raw_end, CALENDAR_TIMEZONE)
+
         # Conflict Detection Check
-        existing_events = calendar_service.events().list(
-            calendarId='primary',
-            timeMin=start_time,
-            timeMax=end_time,
-            singleEvents=True
-        ).execute().get('items', [])
-        
-        if existing_events:
-            conflicts = ", ".join([e.get('summary', 'Event') for e in existing_events])
-            return f"⚠️ CONFLICT DETECTED! You already have these event(s) at this time: {conflicts}. Ask the user if they still want to proceed or reschedule."
+        conflicts = calendar_service_module.check_calendar_conflict(start_time, end_time)
+        if conflicts:
+            conflict_names = ", ".join(conflicts)
+            return f"⚠️ CONFLICT DETECTED! You already have these event(s) at this time: {conflict_names}. Ask the user if they still want to proceed or reschedule."
         
         event_body = {
             'summary': summary,
@@ -183,15 +192,18 @@ def update_event(details: str) -> str:
 
     try:
         parts = [p.strip() for p in details.split('|')]
-        event_id, summary, start_time, end_time = parts[0], parts[1], parts[2], parts[3]
+        event_id, summary, raw_start, raw_end = parts[0], parts[1], parts[2], parts[3]
         
+        start_time = calendar_service_module._format_rfc3339_with_tz(raw_start, CALENDAR_TIMEZONE)
+        end_time = calendar_service_module._format_rfc3339_with_tz(raw_end, CALENDAR_TIMEZONE)
+
         event = calendar_service.events().get(calendarId='primary', eventId=event_id).execute()
         event['summary'] = summary
-        event['start'] = {'dateTime': start_time}
-        event['end'] = {'dateTime': end_time}
+        event['start'] = {'dateTime': start_time, 'timeZone': CALENDAR_TIMEZONE}
+        event['end'] = {'dateTime': end_time, 'timeZone': CALENDAR_TIMEZONE}
         
         updated = calendar_service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
-        return f"✏️ Event updated: '{updated.get('summary')}' is now at {start_time}"
+        return f"✏️ Event updated: '{updated.get('summary')}' is now at {start_time} ({CALENDAR_TIMEZONE})"
     except Exception as e:
         return f"Error updating event: {str(e)}"
 
@@ -293,7 +305,7 @@ def clean_agent_response(response) -> str:
 def run_calendar_without_llm(user_text: str) -> str:
     """Handle common calendar requests when Gemini quota is unavailable."""
     try:
-        parsed_data = parse_schedule_message(user_text)
+        parsed_data = parse_schedule_message(user_text, CALENDAR_TIMEZONE)
         replies = []
 
         for event in parsed_data.events:
@@ -307,8 +319,7 @@ def run_calendar_without_llm(user_text: str) -> str:
                 link = calendar_service_module.create_google_calendar_event(event)
                 replies.append(
                     f"Event created: {event.event_name}\n"
-                    f"Time ({calendar_service_module.get_primary_calendar_timezone(calendar_service)}): "
-                    f"{event.start_time} to {event.end_time}\n"
+                    f"Time ({CALENDAR_TIMEZONE}): {event.start_time} to {event.end_time}\n"
                     f"Calendar link: {link}"
                 )
             elif action == "LIST":
@@ -386,13 +397,13 @@ async def check_upcoming_reminders():
     if not TELEGRAM_CHAT_ID or calendar_service is None:
         return
     
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     in_15_mins = now + datetime.timedelta(minutes=15)
     
     events_result = calendar_service.events().list(
         calendarId='primary',
-        timeMin=now.isoformat() + 'Z',
-        timeMax=in_15_mins.isoformat() + 'Z',
+        timeMin=now.isoformat().replace('+00:00', 'Z'),
+        timeMax=in_15_mins.isoformat().replace('+00:00', 'Z'),
         singleEvents=True
     ).execute()
     
@@ -419,7 +430,7 @@ async def auto_scan_tea_invites():
     lines = ["📧 **New Drive/internship message detected in Gmail:**"]
     for message in messages:
         email_text = f"{message['subject']}\n{message['snippet']}"
-        parsed_email = parse_schedule_message(email_text, "Asia/Kolkata")
+        parsed_email = parse_schedule_message(email_text, CALENDAR_TIMEZONE)
         PENDING_GMAIL_EVENTS[TELEGRAM_CHAT_ID].extend(parsed_email.events)
         lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['display_snippet']}")
     lines.append("\nReply 'approve' after reviewing it to add it to the calendar.")
@@ -465,7 +476,7 @@ async def telegram_webhook(request: Request):
                     pending_events = []
                     for message in messages:
                         email_text = f"{message['subject']}\n{message['snippet']}"
-                        pending_events.extend(parse_schedule_message(email_text, "Asia/Kolkata").events)
+                        pending_events.extend(parse_schedule_message(email_text, CALENDAR_TIMEZONE).events)
                 except Exception as exc:
                     send_telegram_message(chat_id, f"❌ Could not recover the Gmail event: {exc}")
                     return {"status": "ok"}
@@ -490,7 +501,7 @@ async def telegram_webhook(request: Request):
             lines = ["📧 Gmail messages found (Drive/internship):"]
             for message in messages:
                 email_text = f"{message['subject']}\n{message['snippet']}"
-                parsed_email = parse_schedule_message(email_text, "Asia/Kolkata")
+                parsed_email = parse_schedule_message(email_text, CALENDAR_TIMEZONE)
                 PENDING_GMAIL_EVENTS[chat_id].extend(parsed_email.events)
                 lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['display_snippet']}")
             lines.append("\nReply 'approve' to add these detected event(s) to your calendar.")
