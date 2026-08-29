@@ -1870,8 +1870,352 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
 
 # ---------------------------------------------------------------------------
-# 10. Frontend UI Route (Gated Jinja2 Template Rendering)
+# 10. Frontend UI & Legal Routes (/privacy, /terms, /)
 # ---------------------------------------------------------------------------
+@app.get("/privacy", response_class=HTMLResponse)
+async def serve_privacy(request: Request):
+    """
+    Renders the official Privacy Policy for Google OAuth Verification & Google Search Console.
+    Complies with Google API Services User Data Policy, including Limited Use requirements.
+    """
+    html_content = """<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google-site-verification" content="VEHl4mzgS2aSF1pyd69IZiLSW6EC2m2VrnC_A4tpTxo" />
+    <title>Privacy Policy - AI Calendar Assistant</title>
+    <meta name="description" content="Privacy Policy for AI Calendar Assistant. Learn how we access, use, and protect your Google Calendar and Gmail data in compliance with Google API Services User Data Policy.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --bg-primary: #0b0f17;
+            --bg-card: rgba(17, 24, 39, 0.85);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-primary: #6366f1;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+            --radius-lg: 16px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.7;
+            padding: 2.5rem 1.25rem;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 840px;
+            margin: 0 auto;
+            background: var(--bg-card);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 2.5rem 2.25rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        .header {
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .header h1 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header .subtitle {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+        .header .last-updated {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+        .btn-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            background: rgba(99, 102, 241, 0.15);
+            color: #a5b4fc;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.88rem;
+            font-weight: 600;
+            margin-bottom: 1.75rem;
+            transition: all 0.2s ease;
+        }
+        .btn-back:hover {
+            background: rgba(99, 102, 241, 0.25);
+            color: #ffffff;
+            transform: translateX(-3px);
+        }
+        h2 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-top: 2rem;
+            margin-bottom: 0.75rem;
+        }
+        p, ul {
+            font-size: 0.92rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.2rem;
+        }
+        ul { padding-left: 1.5rem; }
+        li { margin-bottom: 0.5rem; }
+        .highlight-box {
+            background: rgba(99, 102, 241, 0.08);
+            border-left: 4px solid var(--accent-primary);
+            padding: 1.25rem;
+            border-radius: 0 8px 8px 0;
+            margin: 1.5rem 0;
+        }
+        .highlight-box p {
+            color: #e0e7ff;
+            margin-bottom: 0;
+            font-size: 0.9rem;
+        }
+        a { color: #818cf8; }
+        .footer-note {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="btn-back"><i class="fa-solid fa-arrow-left"></i> Back to AI Calendar Assistant</a>
+        
+        <div class="header">
+            <h1>Privacy Policy</h1>
+            <div class="subtitle">AI Calendar Assistant</div>
+            <div class="last-updated">Last Updated: August 29, 2026</div>
+        </div>
+
+        <p>This Privacy Policy describes how <strong>AI Calendar Assistant</strong> ("we", "our", or "the Service") collects, uses, and protects your information when you connect your Google Account to our application.</p>
+
+        <h2>1. Google User Data Accessed and Scopes</h2>
+        <p>AI Calendar Assistant requests explicit permission to access specific Google API scopes solely to deliver AI-driven scheduling assistance:</p>
+        <ul>
+            <li><strong>Google Calendar API (<code>https://www.googleapis.com/auth/calendar.events</code>, <code>https://www.googleapis.com/auth/calendar.readonly</code>)</strong>: Used solely to query upcoming schedule events, check availability, detect scheduling conflicts, insert new meetings with travel buffers and Google Meet links, reschedule or edit existing events, color-code, and delete events upon your conversational commands.</li>
+            <li><strong>Gmail API (<code>https://www.googleapis.com/auth/gmail.readonly</code>)</strong>: Used solely to scan unread email threads for meeting, coffee, or sync invitations so you can schedule them in one click.</li>
+            <li><strong>Google Profile & OpenID (<code>openid</code>, <code>https://www.googleapis.com/auth/userinfo.email</code>, <code>https://www.googleapis.com/auth/userinfo.profile</code>)</strong>: Used solely to authenticate your identity and display your email address and profile avatar.</li>
+        </ul>
+
+        <div class="highlight-box">
+            <p><strong>Google API Services User Data Policy Compliance:</strong><br>
+            AI Calendar Assistant's use and transfer to any other app of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank">Google API Services User Data Policy</a>, including the <strong>Limited Use</strong> requirements.</p>
+        </div>
+
+        <h2>2. How We Use and Protect Your Data</h2>
+        <ul>
+            <li><strong>Zero Unauthorized Sharing:</strong> We do not sell, rent, trade, or transfer your Google Calendar or Gmail data to any third-party advertisers or data brokers.</li>
+            <li><strong>No Model Training:</strong> Your Google Calendar events and email contents are never used to train or fine-tune generalized artificial intelligence (AI) or machine learning (ML) models.</li>
+            <li><strong>Session-Based Encryption:</strong> Access and refresh tokens are encrypted and maintained in isolated, secure HTTP-only cookies on your browser during your active session.</li>
+            <li><strong>Multi-User Isolation:</strong> Chat conversations are stored in a private SQLite database isolated strictly by authenticated user email. No other user can access your conversation logs.</li>
+        </ul>
+
+        <h2>3. Data Retention and Deletion Rights</h2>
+        <p>You maintain 100% control over your data stored within AI Calendar Assistant:</p>
+        <ul>
+            <li><strong>Conversation Deletion:</strong> You can delete any individual chat conversation or wipe all history permanently using the "Clear all history" button in the app sidebar.</li>
+            <li><strong>Account Sign-Out:</strong> Clicking "Sign Out" immediately destroys your active session and cached tokens.</li>
+            <li><strong>OAuth Permissions Revocation:</strong> You can permanently revoke AI Calendar Assistant's access to your Google Account at any time through <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions Settings</a>.</li>
+        </ul>
+
+        <h2>4. Contact Information</h2>
+        <p>If you have any questions regarding this Privacy Policy or our data practices, please contact us via our GitHub repository at <a href="https://github.com/DilipPalanisamy/ai-calendar-agent" target="_blank">github.com/DilipPalanisamy/ai-calendar-agent</a>.</p>
+
+        <div class="footer-note">
+            © 2026 AI Calendar Assistant. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content, status_code=200)
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def serve_terms(request: Request):
+    """
+    Renders the official Terms of Service for Google OAuth Verification & Google Search Console.
+    """
+    html_content = """<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google-site-verification" content="VEHl4mzgS2aSF1pyd69IZiLSW6EC2m2VrnC_A4tpTxo" />
+    <title>Terms of Service - AI Calendar Assistant</title>
+    <meta name="description" content="Terms of Service for AI Calendar Assistant. Learn the terms and conditions governing your use of our AI scheduling coordinator.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --bg-primary: #0b0f17;
+            --bg-card: rgba(17, 24, 39, 0.85);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-primary: #6366f1;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+            --radius-lg: 16px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.7;
+            padding: 2.5rem 1.25rem;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 840px;
+            margin: 0 auto;
+            background: var(--bg-card);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 2.5rem 2.25rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        .header {
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .header h1 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header .subtitle {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+        .header .last-updated {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+        .btn-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            background: rgba(99, 102, 241, 0.15);
+            color: #a5b4fc;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.88rem;
+            font-weight: 600;
+            margin-bottom: 1.75rem;
+            transition: all 0.2s ease;
+        }
+        .btn-back:hover {
+            background: rgba(99, 102, 241, 0.25);
+            color: #ffffff;
+            transform: translateX(-3px);
+        }
+        h2 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-top: 2rem;
+            margin-bottom: 0.75rem;
+        }
+        p, ul {
+            font-size: 0.92rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.2rem;
+        }
+        ul { padding-left: 1.5rem; }
+        li { margin-bottom: 0.5rem; }
+        a { color: #818cf8; }
+        .footer-note {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="btn-back"><i class="fa-solid fa-arrow-left"></i> Back to AI Calendar Assistant</a>
+        
+        <div class="header">
+            <h1>Terms of Service</h1>
+            <div class="subtitle">AI Calendar Assistant</div>
+            <div class="last-updated">Last Updated: August 29, 2026</div>
+        </div>
+
+        <h2>1. Acceptance of Terms</h2>
+        <p>By accessing or using <strong>AI Calendar Assistant</strong>, you agree to be bound by these Terms of Service. If you disagree with any part of these terms, you may not access or use the Service.</p>
+
+        <h2>2. Description of the Service</h2>
+        <p>AI Calendar Assistant is an intelligent scheduling assistant powered by Google Gemini and Google APIs. It allows users to interactively manage their Google Calendar schedules, create and reschedule events, color-code meetings, and scan Gmail for invitations using natural language and voice commands.</p>
+
+        <h2>3. User Responsibilities & Acceptable Use</h2>
+        <ul>
+            <li>You agree to use AI Calendar Assistant only for lawful scheduling and communication purposes.</li>
+            <li>You are responsible for maintaining the confidentiality of your Google Account credentials and managing authorized devices.</li>
+            <li>You agree not to attempt to reverse engineer, disrupt, or exploit the service infrastructure.</li>
+        </ul>
+
+        <h2>4. AI Disclaimers & Appointment Verification</h2>
+        <p>AI Calendar Assistant utilizes advanced AI models to interpret dates, times, and participant lists. While designed for high accuracy and timezone awareness (IST / UTC+5:30), users are encouraged to verify important event details and invitations on their Google Calendar.</p>
+
+        <h2>5. Service Availability & Modifications</h2>
+        <p>We strive to provide uninterrupted service, but we do not guarantee 100% uptime. We reserve the right to modify, suspend, or discontinue any feature with or without notice.</p>
+
+        <h2>6. Limitation of Liability</h2>
+        <p>To the maximum extent permitted by law, AI Calendar Assistant and its maintainers shall not be liable for any indirect, incidental, special, or consequential damages resulting from your use of the service.</p>
+
+        <h2>7. Contact</h2>
+        <p>For questions or feedback regarding these Terms, please reach out via <a href="https://github.com/DilipPalanisamy/ai-calendar-agent" target="_blank">github.com/DilipPalanisamy/ai-calendar-agent</a>.</p>
+
+        <div class="footer-note">
+            © 2026 AI Calendar Assistant. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content, status_code=200)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_index(request: Request):
     """
@@ -1906,5 +2250,5 @@ async def serve_index(request: Request):
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     host = os.getenv("HOST", "0.0.0.0")
-    logger.info(f"Starting AI Calendar Agent on http://{host}:{port}")
+    logger.info(f"Starting AI Calendar Assistant on http://{host}:{port}")
     uvicorn.run("main:app", host=host, port=port, reload=True)

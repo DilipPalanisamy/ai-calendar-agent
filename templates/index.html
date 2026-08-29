@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="google-site-verification" content="VEHl4mzgS2aSF1pyd69IZiLSW6EC2m2VrnC_A4tpTxo" />
     <meta name="theme-color" content="#0b0f17">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>AI Calendar Agent - Smart Scheduling & Gmail Assistant</title>
-    <meta name="description" content="AI Calendar Agent: Manage, schedule, and delete Google Calendar events and scan Gmail invitations with Gemini AI.">
+    <title>AI Calendar Assistant</title>
+    <meta name="description" content="AI Calendar Assistant: Manage, schedule, and delete Google Calendar events and scan Gmail invitations with Gemini AI.">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1146,7 +1147,7 @@
                         <div class="brand-icon">
                             <i class="fa-solid fa-calendar-check"></i>
                         </div>
-                        <span class="brand-text">AI Calendar</span>
+                        <span class="brand-text">AI Calendar Assistant</span>
                     </div>
                     <button class="btn-sidebar-close" id="sidebar-close" title="Close menu">
                         <i class="fa-solid fa-xmark"></i>
@@ -1241,8 +1242,8 @@
                         <div class="welcome-icon">
                             <i class="fa-solid fa-robot"></i>
                         </div>
-                        <h1 class="welcome-title">How can I assist your schedule?</h1>
-                        <p class="welcome-subtitle">I can create and delete Google Calendar events, find conflicts, and scan your Gmail for invitations in IST.</p>
+                        <h1 class="welcome-title">AI Calendar Assistant</h1>
+                        <p class="welcome-subtitle">Your intelligent schedule coordinator & Gmail assistant powered by Gemini AI.</p>
 
                         <div class="prompt-grid">
                             <div class="prompt-card" onclick="sendPrompt('What upcoming events do I have on my calendar this week?')">
@@ -1274,7 +1275,7 @@
                     <textarea 
                         id="chat-input" 
                         class="chat-input" 
-                        placeholder="Message AI Calendar Agent or use voice..." 
+                        placeholder="Message AI Calendar Assistant or use voice..." 
                         rows="1"></textarea>
                     <button class="btn-mic" id="mic-btn" title="Voice Input (Click to Speak)" aria-label="Voice Input">
                         <i class="fa-solid fa-microphone"></i>
@@ -1282,6 +1283,10 @@
                     <button class="btn-send" id="btn-send" title="Send Message" aria-label="Send Message">
                         <i class="fa-solid fa-paper-plane"></i>
                     </button>
+                </div>
+                <div class="chat-legal-footer" style="font-size: 0.72rem; color: var(--text-muted); text-align: center; margin-top: 0.5rem;">
+                    <a href="/privacy" target="_blank" style="color: var(--text-muted); text-decoration: none;">Privacy Policy</a> • 
+                    <a href="/terms" target="_blank" style="color: var(--text-muted); text-decoration: none;">Terms of Service</a>
                 </div>
             </div>
         </main>

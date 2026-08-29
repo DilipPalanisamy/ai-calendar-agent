@@ -22,7 +22,23 @@ def test_endpoints():
     res_login = client.get("/login")
     assert res_login.status_code == 200, f"Expected 200 OK, got {res_login.status_code}"
     assert "Sign in with Google" in res_login.text, "Login page missing Google Sign-in button"
-    print("[PASS] GET /login (200 OK, Login Page rendered)", flush=True)
+    assert "VEHl4mzgS2aSF1pyd69IZiLSW6EC2m2VrnC_A4tpTxo" in res_login.text, "Login page missing Google verification tag"
+    print("[PASS] GET /login (200 OK, Login Page rendered with Google verification tag)", flush=True)
+
+    print("Testing GET /privacy (Privacy Policy)...", flush=True)
+    res_privacy = client.get("/privacy")
+    assert res_privacy.status_code == 200, f"Expected 200 OK, got {res_privacy.status_code}"
+    assert "Privacy Policy" in res_privacy.text, "Privacy policy missing title"
+    assert "VEHl4mzgS2aSF1pyd69IZiLSW6EC2m2VrnC_A4tpTxo" in res_privacy.text, "Privacy policy missing Google verification tag"
+    assert "Google API Services User Data Policy" in res_privacy.text, "Privacy policy missing Google Policy reference"
+    print("[PASS] GET /privacy (200 OK, Privacy Policy rendered)", flush=True)
+
+    print("Testing GET /terms (Terms of Service)...", flush=True)
+    res_terms = client.get("/terms")
+    assert res_terms.status_code == 200, f"Expected 200 OK, got {res_terms.status_code}"
+    assert "Terms of Service" in res_terms.text, "Terms of service missing title"
+    assert "VEHl4mzgS2aSF1pyd69IZiLSW6EC2m2VrnC_A4tpTxo" in res_terms.text, "Terms of service missing Google verification tag"
+    print("[PASS] GET /terms (200 OK, Terms of Service rendered)", flush=True)
 
     print("Testing GET /api/me (Unauthenticated)...", flush=True)
     res_me = client.get("/api/me")
