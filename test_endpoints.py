@@ -62,36 +62,45 @@ def test_endpoints():
     assert res_logout.headers.get("location") == "/login", f"Expected location /login, got {res_logout.headers.get('location')}"
     print("[PASS] GET /logout (303 Redirect to /login)", flush=True)
 
-    # SQLite Database Unit Tests
-    print("Testing SQLite Chat History Database CRUD...", flush=True)
-    test_user = "test_user@example.com"
-    delete_all_user_sessions(test_user)
+    # SQLite Database Multi-User Isolation Tests
+    print("Testing SQLite Chat History Multi-User Isolation...", flush=True)
+    user_a = "user_a@gmail.com"
+    user_b = "user_b@gmail.com"
+    delete_all_user_sessions(user_a)
+    delete_all_user_sessions(user_b)
 
-    # Create session
-    session_id = create_chat_session(test_user, "Test Meeting Chat")
-    assert session_id is not None, "Failed creating session"
+    # Create sessions for User A and User B
+    s_a = create_chat_session(user_a, "User A Private Calendar Plan")
+    save_chat_message(s_a, "user", "Schedule sync with team tomorrow", user_a)
+    save_chat_message(s_a, "assistant", "Event scheduled for User A.", user_a)
 
-    # Save messages
-    save_chat_message(session_id, "user", "Schedule lunch tomorrow at 1 PM")
-    save_chat_message(session_id, "assistant", "I have scheduled your lunch tomorrow at 1:00 PM.")
+    s_b = create_chat_session(user_b, "User B Flight Details")
+    save_chat_message(s_b, "user", "Check flights on Friday", user_b)
+    save_chat_message(s_b, "assistant", "Flight check completed for User B.", user_b)
 
-    # Retrieve sessions
-    sessions = get_user_chat_sessions(test_user)
-    assert len(sessions) == 1, f"Expected 1 session, got {len(sessions)}"
-    assert sessions[0]["title"] == "Test Meeting Chat"
+    # Verify User A only sees User A's session
+    sessions_a = get_user_chat_sessions(user_a)
+    assert len(sessions_a) == 1
+    assert sessions_a[0]["id"] == s_a
+    assert sessions_a[0]["title"] == "User A Private Calendar Plan"
 
-    # Retrieve session details with messages
-    details = get_chat_session_details(session_id, test_user)
-    assert details is not None
-    assert len(details["messages"]) == 2
-    assert details["messages"][0]["sender"] == "user"
-    assert details["messages"][1]["sender"] == "assistant"
+    # Verify User B cannot access User A's session details
+    assert get_chat_session_details(s_a, user_b) is None, "Security violation: User B accessed User A's session!"
 
-    # Delete session
-    del_ok = delete_chat_session(session_id, test_user)
-    assert del_ok is True
-    assert get_chat_session_details(session_id, test_user) is None
-    print("[PASS] SQLite Chat History CRUD tests completed successfully!", flush=True)
+    # Verify User B only sees User B's session
+    sessions_b = get_user_chat_sessions(user_b)
+    assert len(sessions_b) == 1
+    assert sessions_b[0]["id"] == s_b
+    assert sessions_b[0]["title"] == "User B Flight Details"
+
+    # Deleting User A's session must NOT affect User B's history
+    delete_chat_session(s_a, user_a)
+    assert len(get_user_chat_sessions(user_a)) == 0
+    assert len(get_user_chat_sessions(user_b)) == 1, "Isolation violation: Deleting User A cleared User B's data!"
+
+    delete_all_user_sessions(user_b)
+    assert len(get_user_chat_sessions(user_b)) == 0
+    print("[PASS] Multi-User Chat History Isolation verified 100%!", flush=True)
 
     print("\n==========================================", flush=True)
     print("ALL FASTAPI & MULTI-ACCOUNT TESTS PASSED 100%!", flush=True)

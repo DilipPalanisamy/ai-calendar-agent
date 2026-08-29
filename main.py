@@ -81,7 +81,7 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 def init_db():
-    """Initializes SQLite database schema for chat sessions and messages."""
+    """Initializes SQLite database schema with strict user_email indexing for chat sessions and messages."""
     with get_db_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -98,6 +98,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
+                user_email TEXT,
                 sender TEXT NOT NULL,
                 content TEXT NOT NULL,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -105,8 +106,16 @@ def init_db():
             );
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, timestamp ASC);")
+
+        # Safe schema migration if existing table lacks user_email
+        try:
+            conn.execute("ALTER TABLE chat_messages ADD COLUMN user_email TEXT;")
+        except Exception:
+            pass
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user ON chat_messages(user_email, timestamp ASC);")
         conn.commit()
-    logger.info("SQLite Chat History database initialized successfully.")
+    logger.info("SQLite Chat History database initialized successfully with user_email isolation.")
 
 
 # Initialize database at startup
@@ -114,7 +123,7 @@ init_db()
 
 
 def create_chat_session(user_email: str, title: str) -> str:
-    """Creates a new chat session and returns its unique UUID."""
+    """Creates a new chat session strictly tied to the user's Gmail address."""
     session_id = str(uuid.uuid4())
     now_str = datetime.now(timezone.utc).isoformat()
     with get_db_connection() as conn:
@@ -127,7 +136,7 @@ def create_chat_session(user_email: str, title: str) -> str:
 
 
 def get_user_chat_sessions(user_email: str) -> List[Dict[str, Any]]:
-    """Retrieves all chat sessions for a specific user ordered by recency."""
+    """Retrieves all chat sessions strictly belonging to the specified user email."""
     with get_db_connection() as conn:
         cursor = conn.execute(
             "SELECT id, title, created_at, updated_at FROM chat_sessions WHERE user_email = ? ORDER BY updated_at DESC",
@@ -138,7 +147,7 @@ def get_user_chat_sessions(user_email: str) -> List[Dict[str, Any]]:
 
 
 def get_chat_session_details(session_id: str, user_email: str) -> Optional[Dict[str, Any]]:
-    """Retrieves a session and all its messages, verifying user ownership."""
+    """Retrieves a session and all its messages, verifying strict ownership by user_email."""
     with get_db_connection() as conn:
         s_cur = conn.execute(
             "SELECT id, title, created_at, updated_at FROM chat_sessions WHERE id = ? AND user_email = ?",
@@ -166,13 +175,13 @@ def get_chat_session_details(session_id: str, user_email: str) -> Optional[Dict[
         }
 
 
-def save_chat_message(session_id: str, sender: str, content: str):
-    """Appends a message to a session and updates the session timestamp."""
+def save_chat_message(session_id: str, sender: str, content: str, user_email: str = ""):
+    """Appends a message to a session tied to the user email and updates timestamp."""
     now_str = datetime.now(timezone.utc).isoformat()
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT INTO chat_messages (session_id, sender, content, timestamp) VALUES (?, ?, ?, ?)",
-            (session_id, sender, content, now_str)
+            "INSERT INTO chat_messages (session_id, user_email, sender, content, timestamp) VALUES (?, ?, ?, ?, ?)",
+            (session_id, user_email, sender, content, now_str)
         )
         conn.execute(
             "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
@@ -182,7 +191,7 @@ def save_chat_message(session_id: str, sender: str, content: str):
 
 
 def delete_chat_session(session_id: str, user_email: str) -> bool:
-    """Deletes a specific chat session and all associated messages."""
+    """Deletes a specific chat session strictly owned by user_email."""
     with get_db_connection() as conn:
         cur = conn.execute(
             "DELETE FROM chat_sessions WHERE id = ? AND user_email = ?",
@@ -193,7 +202,7 @@ def delete_chat_session(session_id: str, user_email: str) -> bool:
 
 
 def delete_all_user_sessions(user_email: str) -> int:
-    """Clears all chat sessions and history for a given user."""
+    """Clears all chat history records strictly for the specified user_email."""
     with get_db_connection() as conn:
         cur = conn.execute("DELETE FROM chat_sessions WHERE user_email = ?", (user_email,))
         conn.commit()
@@ -926,7 +935,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         session_id = await asyncio.to_thread(create_chat_session, active_email, session_title)
 
     # Save incoming user message asynchronously
-    await asyncio.to_thread(save_chat_message, session_id, "user", user_message)
+    await asyncio.to_thread(save_chat_message, session_id, "user", user_message, active_email)
 
     try:
         now_dt = datetime.now(timezone.utc).astimezone()
@@ -1093,7 +1102,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             final_text = "I processed your request. Let me know if you need anything else with your schedule or emails!"
 
         # Save outgoing bot response to SQLite asynchronously
-        await asyncio.to_thread(save_chat_message, session_id, "assistant", str(final_text))
+        await asyncio.to_thread(save_chat_message, session_id, "assistant", str(final_text), active_email)
 
         return JSONResponse({
             "response": str(final_text),
