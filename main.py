@@ -297,9 +297,9 @@ def get_redirect_uri(request: Request) -> str:
 
 def get_accounts_dict(request: Request) -> Dict[str, Any]:
     """Retrieves the multi-account dictionary from session with legacy fallback."""
-    accounts = request.session.get("accounts")
-    if isinstance(accounts, dict) and accounts:
-        return accounts
+    raw_accounts = request.session.get("accounts")
+    if isinstance(raw_accounts, dict) and raw_accounts:
+        return dict(raw_accounts)
 
     legacy_creds = request.session.get("user_creds")
     legacy_email = request.session.get("user_email")
@@ -358,6 +358,7 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
             creds_data["token"] = creds.token
             creds_data["refresh_token"] = creds.refresh_token
             creds_data["token_uri"] = creds.token_uri
+            accounts = get_accounts_dict(request)
             accounts[active_email] = creds_data
             request.session["accounts"] = accounts
 
@@ -736,12 +737,13 @@ async def auth_callback(request: Request):
 
         userinfo_service = build("oauth2", "v2", credentials=credentials, static_discovery=False)
         user_info = userinfo_service.userinfo().get().execute()
-
-        email = user_info.get("email", "")
+        email = user_info.get("email", "").strip()
         name = user_info.get("name", email)
         picture = user_info.get("picture", "")
 
-        accounts = get_accounts_dict(request)
+        # Safely preserve existing accounts and merge new one
+        existing_accounts = get_accounts_dict(request)
+        accounts = dict(existing_accounts)
         already_connected = email in accounts
 
         accounts[email] = {
@@ -755,21 +757,23 @@ async def auth_callback(request: Request):
             "picture": picture,
         }
 
+        # Explicitly assign dictionary back to session
         request.session["accounts"] = accounts
         request.session["active_account"] = email
 
         if already_connected:
-            request.session["account_notice"] = f"ℹ️ Account '{email}' was already logged in. It is now set as the active account."
+            request.session["account_notice"] = f"ℹ️ Account '{email}' was already connected and is now set as active."
         else:
-            request.session["account_notice"] = f"✅ Successfully connected new Google account: '{email}'."
+            request.session["account_notice"] = f"✅ Successfully connected Google account: '{email}'."
 
+        # Top-level sync
         request.session["user_email"] = email
         request.session["user_name"] = name
         request.session["user_picture"] = picture
         request.session["user_creds"] = accounts[email]
         request.session.pop("oauth_state", None)
 
-        logger.info(f"Google Account '{email}' successfully connected (already_connected={already_connected}) & set as active.")
+        logger.info(f"Google Account '{email}' successfully merged into session (total accounts: {len(accounts)}) & set as active.")
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     except Exception as e:
