@@ -490,10 +490,11 @@ async def create_event_tool(
     attendees: Optional[List[str]] = None,
     add_google_meet: bool = False,
     travel_buffer_minutes: Optional[int] = None,
+    recurrence_rule: Optional[str] = None,
     ignore_conflicts: bool = False,
 ) -> str:
     """
-    Creates a new event on user's primary Google Calendar with smart conflict detection, automated travel time buffers, Google Meet video link generation, and guest invitations in IST.
+    Creates a new event on user's primary Google Calendar with smart conflict detection, automated travel time buffers, Google Meet video link generation, guest invitations, and RFC 5545 recurrence rules in IST.
     """
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
@@ -518,8 +519,8 @@ async def create_event_tool(
 
         duration = req_end - req_start
 
-        # 1. Smart Conflict Detection & Alternative Slot Search (unless ignore_conflicts is requested)
-        if not ignore_conflicts:
+        # 1. Smart Conflict Detection & Alternative Slot Search (unless ignore_conflicts is requested or recurring)
+        if not ignore_conflicts and not recurrence_rule:
             search_window_start = req_start.replace(hour=0, minute=0, second=0, microsecond=0)
             search_window_end = (req_start + timedelta(days=2)).replace(hour=23, minute=59, second=59, microsecond=0)
 
@@ -650,7 +651,7 @@ async def create_event_tool(
             except Exception as buf_err:
                 logger.warning(f"Failed to create travel buffer event: {buf_err}")
 
-        # 3. Insert Main Event
+        # 3. Insert Main Event (with optional RRULE recurrence)
         event_body: Dict[str, Any] = {
             "summary": summary,
             "description": description or "Scheduled via AI Calendar Agent",
@@ -669,6 +670,12 @@ async def create_event_tool(
 
         if attendees:
             event_body["attendees"] = [{"email": email.strip()} for email in attendees if email.strip()]
+
+        if recurrence_rule and recurrence_rule.strip():
+            rrule_clean = recurrence_rule.strip()
+            if not rrule_clean.upper().startswith("RRULE:"):
+                rrule_clean = f"RRULE:{rrule_clean}"
+            event_body["recurrence"] = [rrule_clean]
 
         if add_google_meet:
             req_id = f"meet-{uuid.uuid4().hex[:8]}-{int(datetime.now().timestamp())}"
@@ -1452,9 +1459,10 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             attendees: Optional[List[str]] = None,
             add_google_meet: bool = False,
             travel_buffer_minutes: Optional[int] = None,
+            recurrence_rule: Optional[str] = None,
             ignore_conflicts: bool = False,
         ) -> str:
-            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection, automated travel time buffers, Google Meet video link generation, and attendee invitations."""
+            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection, automated travel time buffers, Google Meet video link generation, attendee invitations, and recurring schedule rules."""
             return await create_event_tool(
                 user_creds,
                 summary=summary,
@@ -1465,6 +1473,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 attendees=attendees,
                 add_google_meet=add_google_meet,
                 travel_buffer_minutes=travel_buffer_minutes,
+                recurrence_rule=recurrence_rule,
                 ignore_conflicts=ignore_conflicts,
             )
 
@@ -1512,7 +1521,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             StructuredTool.from_function(
                 coroutine=create_event_wrapper,
                 name="create_event",
-                description="Create Google Calendar event in IST (+05:30). Automatically creates a travel time buffer before the event if location is provided. Set add_google_meet=True to generate a Google Meet link. Pass guest emails in attendees list.",
+                description="Create Google Calendar event in IST (+05:30). Supports recurrence_rule for repeating events (e.g. 'FREQ=DAILY', 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', 'FREQ=WEEKLY;BYDAY=MO', 'FREQ=MONTHLY'). Automatically creates travel time buffer if location provided. Set add_google_meet=True for Google Meet. Pass guest emails in attendees.",
             ),
             StructuredTool.from_function(
                 coroutine=update_calendar_event_wrapper,
@@ -1533,7 +1542,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Travel Buffer & Google Meet
+        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Recurring Rules & Travel Buffer
         system_prompt = (
             "System Directive: You are a high-speed calendar AI assistant. Be concise, direct, and helpful. "
             f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
@@ -1545,7 +1554,14 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "Instructions:\n"
             "1. When user asks about schedule or availability, call `list_events` with time_min relative to Current Local DateTime.\n"
             "2. When user asks to create/schedule an event:\n"
-            "   - If a physical location/venue is mentioned (e.g. 'Hotel Residency', 'Client Office', 'Cafe Coffee Day'), extract it into `location` and specify `travel_buffer_minutes=30` (or user-specified buffer).\n"
+            "   - If the event is recurring/repeating, parse the user's frequency into a valid RFC 5545 RRULE string for `recurrence_rule`:\n"
+            "     * 'Every day' / 'Daily' -> 'FREQ=DAILY'\n"
+            "     * 'Every weekday' / 'Mon to Fri' -> 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'\n"
+            "     * 'Every weekend' -> 'FREQ=WEEKLY;BYDAY=SA,SU'\n"
+            "     * 'Every Monday' -> 'FREQ=WEEKLY;BYDAY=MO'\n"
+            "     * 'Every 2 weeks on Tuesday' -> 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU'\n"
+            "     * 'Monthly' -> 'FREQ=MONTHLY'\n"
+            "   - If a physical venue is mentioned, extract it into `location` and specify `travel_buffer_minutes=30`.\n"
             "   - Extract guest emails into `attendees` (e.g. ['colleague@example.com']).\n"
             "   - Set `add_google_meet=True` if the user mentions Google Meet, video call, meeting link, online sync, or invites guests.\n"
             "   - Compute start_time and end_time in IST with '+05:30' offset and call `create_event`.\n"
@@ -1559,7 +1575,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "     * If user says 'Schedule anyway' or 'Force schedule', call `create_event` with `ignore_conflicts=True`.\n"
             "   - If `create_event` succeeds, give a clear confirmation with:\n"
             "     * Event title, start/end time in IST, location, and calendar event link.\n"
-            "     * If a travel buffer was created, mention it clearly: '🚗 Travel Buffer added: [Time]'.\n"
+            "     * If recurring, state the recurrence clearly (e.g., '🔁 Repeats: Every weekday (Mon–Fri)').\n"
+            "     * If a travel buffer was created, mention it: '🚗 Travel Buffer added: [Time]'.\n"
             "     * If a Google Meet link was created, display it as a clickable link: '[📹 Join with Google Meet](MEET_URL)'.\n"
             "     * If attendees were invited, mention them: 'Invites sent to: [emails]'.\n"
             "     * Include delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
