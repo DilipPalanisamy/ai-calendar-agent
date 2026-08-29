@@ -360,10 +360,23 @@ def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 5. Google OAuth 2.0 Web Endpoints
+# 5. Google OAuth 2.0 & Authentication Endpoints
 # ---------------------------------------------------------------------------
-@app.get("/login", response_class=RedirectResponse)
-async def login(request: Request):
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Serves the dedicated Login/Sign Up page for unauthenticated users."""
+    if request.session.get("user_creds"):
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        return templates.TemplateResponse(request=request, name="login.html", context={"request": request})
+    except Exception:
+        return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/auth/login", response_class=RedirectResponse)
+@app.get("/login/google", response_class=RedirectResponse)
+async def auth_login(request: Request):
     """Initiates Google OAuth 2.0 consent flow."""
     try:
         client_config = get_client_config()
@@ -462,12 +475,12 @@ async def auth_callback(request: Request):
 
 @app.get("/logout")
 async def logout(request: Request):
-    """Clears user session and logs out."""
+    """Clears user session and logs out to /login."""
     user_email = request.session.get("user_email")
     request.session.clear()
     if user_email:
         logger.info(f"User '{user_email}' logged out.")
-    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/api/me")
@@ -694,22 +707,28 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
 
 # ---------------------------------------------------------------------------
-# 7. Frontend UI Route (Jinja2 Template Rendering)
+# 7. Frontend UI Route (Gated Jinja2 Template Rendering)
 # ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def serve_index(request: Request):
-    """Renders the ChatGPT-style modern web interface using Jinja2Templates."""
+    """
+    Renders the ChatGPT-style modern web interface for authenticated users.
+    Redirects unauthenticated visitors to /login.
+    """
+    user_creds = request.session.get("user_creds")
+    if not user_creds:
+        return RedirectResponse(url="/login", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
     user_email = request.session.get("user_email", "")
-    user_name = request.session.get("user_name", "")
+    user_name = request.session.get("user_name", "User")
     user_picture = request.session.get("user_picture", "")
-    authenticated = bool(request.session.get("user_creds"))
 
     context = {
         "request": request,
         "user_email": user_email,
         "user_name": user_name,
         "user_picture": user_picture,
-        "authenticated": authenticated,
+        "authenticated": True,
     }
 
     try:

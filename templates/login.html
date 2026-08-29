@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In - AI Calendar Agent</title>
+    <meta name="description" content="Sign in to AI Calendar Agent with your Google Account to manage your Google Calendar and Gmail seamlessly with AI.">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+        :root {
+            --bg-primary: #0b0f17;
+            --bg-secondary: #111827;
+            --bg-tertiary: #1f2937;
+            --bg-card: rgba(17, 24, 39, 0.75);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.18);
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-primary: #6366f1;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+            --accent-glow: rgba(99, 102, 241, 0.35);
+            --radius-lg: 20px;
+            --radius-md: 12px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            position: relative;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Ambient Glow Background */
+        .ambient-glow {
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.05) 50%, transparent 70%);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .login-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 2.5rem 2rem;
+            width: 100%;
+            max-width: 460px;
+            text-align: center;
+            position: relative;
+            z-index: 10;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(16px);
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .brand-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.75rem;
+            color: white;
+            margin: 0 auto 1.25rem;
+            box-shadow: 0 8px 24px var(--accent-glow);
+        }
+
+        .brand-title {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.4rem;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-subtitle {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 2rem;
+        }
+
+        /* Features List */
+        .features-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            text-align: left;
+            margin-bottom: 2rem;
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.75rem 0.9rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .feature-item i {
+            color: #818cf8;
+            font-size: 1rem;
+            margin-top: 2px;
+        }
+
+        .feature-text h4 {
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+
+        .feature-text p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            line-height: 1.3;
+        }
+
+        /* Google OAuth Button */
+        .btn-google {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            width: 100%;
+            padding: 0.95rem 1.25rem;
+            background: #ffffff;
+            color: #1f2937;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 700;
+            border-radius: var(--radius-md);
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-google:hover {
+            background: #f8fafc;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-google:active {
+            transform: translateY(0);
+        }
+
+        .btn-google svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .login-footer {
+            margin-top: 1.75rem;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .login-footer a {
+            color: #818cf8;
+            text-decoration: none;
+        }
+
+        .login-footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-glow"></div>
+
+    <div class="login-card">
+        <div class="brand-icon">
+            <i class="fa-solid fa-calendar-check"></i>
+        </div>
+        <h1 class="brand-title">AI Calendar Agent</h1>
+        <p class="brand-subtitle">Your intelligent schedule coordinator & Gmail assistant powered by Gemini AI</p>
+
+        <div class="features-list">
+            <div class="feature-item">
+                <i class="fa-solid fa-calendar-days"></i>
+                <div class="feature-text">
+                    <h4>Smart Calendar Actions</h4>
+                    <p>Schedule meetings, find free slots, and detect conflicts automatically.</p>
+                </div>
+            </div>
+            <div class="feature-item">
+                <i class="fa-solid fa-envelope-open-text"></i>
+                <div class="feature-text">
+                    <h4>Gmail Invitation Scanner</h4>
+                    <p>Find unread coffee, tea, and sync invites and schedule them in 1 click.</p>
+                </div>
+            </div>
+            <div class="feature-item">
+                <i class="fa-solid fa-shield-halved"></i>
+                <div class="feature-text">
+                    <h4>Secure OAuth 2.0</h4>
+                    <p>Your data stays in your personal Google account. Tokens are encrypted per session.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Google OAuth Trigger -->
+        <a href="/auth/login" class="btn-google" id="google-login-btn">
+            <svg viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span>Sign in with Google</span>
+        </a>
+
+        <div class="login-footer">
+            By signing in, you grant AI Calendar Agent permission to read and manage events on your primary Google Calendar and view invitation emails.
+        </div>
+    </div>
+</body>
+</html>
