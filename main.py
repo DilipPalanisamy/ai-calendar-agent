@@ -255,7 +255,7 @@ def delete_all_user_sessions(user_email: str) -> int:
 # 3. FastAPI Application Initialization
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="AI Calendar Agent",
+    title="AI Calendar Assistant",
     description="Multi-user & Multi-Account AI Calendar & Gmail Assistant powered by Gemini & FastAPI",
     version="2.3.0",
 )
@@ -2219,12 +2219,16 @@ async def serve_terms(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def serve_index(request: Request):
     """
-    Renders the ChatGPT-style modern web interface for authenticated users.
-    Redirects unauthenticated visitors to /login.
+    Public Home Page compliant with Google OAuth Verification & Google Search Console.
+    Serves a public HTML page with Google Sign-in for unauthenticated visitors (HTTP 200 OK, NO redirects).
+    Serves the chat assistant interface if the user is authenticated.
     """
     active_email = get_active_account_email(request)
     if not active_email:
-        return RedirectResponse(url="/login", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        try:
+            return templates.TemplateResponse(request=request, name="login.html", context={"request": request})
+        except Exception:
+            return templates.TemplateResponse("login.html", {"request": request})
 
     accounts = get_accounts_dict(request)
     active_data = accounts.get(active_email, {})

@@ -12,11 +12,14 @@ from main import (
 client = TestClient(app)
 
 def test_endpoints():
-    print("Testing GET / (Unauthenticated Gated Redirect)...", flush=True)
+    print("Testing GET / (Public Home Page without Redirect)...", flush=True)
     res_root = client.get("/", follow_redirects=False)
-    assert res_root.status_code == 307, f"Expected 307 Redirect, got {res_root.status_code}"
-    assert res_root.headers.get("location") == "/login", f"Expected location /login, got {res_root.headers.get('location')}"
-    print("[PASS] GET / (307 Redirect to /login)", flush=True)
+    assert res_root.status_code == 200, f"Expected 200 OK, got {res_root.status_code}"
+    assert "AI Calendar Assistant" in res_root.text, "Root page missing app name"
+    assert "Sign in with Google" in res_root.text, "Root page missing Google Sign-in button"
+    assert "VEHl4mzgS2aSF1pyd69IZiLSW6EC2m2VrnC_A4tpTxo" in res_root.text, "Root page missing Google verification tag"
+    assert "/privacy" in res_root.text and "/terms" in res_root.text, "Root page missing legal links"
+    print("[PASS] GET / (200 OK, Public Landing Page with Google Verification & Sign-in)", flush=True)
 
     print("Testing GET /login (Login Page UI)...", flush=True)
     res_login = client.get("/login")
