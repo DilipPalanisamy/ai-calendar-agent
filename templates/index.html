@@ -1202,12 +1202,22 @@
                 welcomeScreen.style.display = 'none';
             }
 
+            // Normalize text to string if an array or object is passed
+            let rawString = "";
+            if (Array.isArray(text)) {
+                rawString = text.map(item => typeof item === 'object' && item !== null ? (item.text || JSON.stringify(item)) : String(item)).join('\n');
+            } else if (typeof text === 'object' && text !== null) {
+                rawString = text.text || JSON.stringify(text, null, 2);
+            } else {
+                rawString = String(text ?? '');
+            }
+
             const timeStr = timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const messageRow = document.createElement('div');
             messageRow.className = `message-row ${sender}`;
 
             if (sender === 'assistant') {
-                const cleanHtml = DOMPurify.sanitize(marked.parse(text));
+                const cleanHtml = DOMPurify.sanitize(marked.parse(rawString));
                 messageRow.innerHTML = `
                     <div class="message-avatar assistant">
                         <i class="fa-solid fa-robot"></i>
@@ -1218,7 +1228,7 @@
                     </div>
                 `;
             } else {
-                const escapedText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                const escapedText = rawString.replace(/</g, "&lt;").replace(/>/g, "&gt;");
                 messageRow.innerHTML = `
                     <div class="message-body">
                         <div class="message-content">${escapedText}</div>

@@ -631,7 +631,23 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     messages.append(response)
 
                     if not response.tool_calls:
-                        final_text = response.content
+                        content_raw = response.content
+                        if isinstance(content_raw, str):
+                            final_text = content_raw
+                        elif isinstance(content_raw, list):
+                            parts = []
+                            for p in content_raw:
+                                if isinstance(p, str):
+                                    parts.append(p)
+                                elif isinstance(p, dict):
+                                    parts.append(p.get("text", json.dumps(p)))
+                                else:
+                                    parts.append(str(p))
+                            final_text = "\n".join(parts)
+                        elif isinstance(content_raw, dict):
+                            final_text = content_raw.get("text", json.dumps(content_raw))
+                        else:
+                            final_text = str(content_raw) if content_raw else ""
                         break
 
                     # Execute tool calls
@@ -667,7 +683,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 raise last_error
             final_text = "I processed your request. Let me know if you need anything else with your schedule or emails!"
 
-        return JSONResponse({"response": final_text})
+        return JSONResponse({"response": str(final_text)})
 
     except Exception as e:
         logger.error(f"Chat execution failed: {e}", exc_info=True)
