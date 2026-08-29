@@ -1266,6 +1266,30 @@
             if (indicator) indicator.remove();
         }
 
+        function showNotification(message) {
+            const toast = document.createElement('div');
+            toast.style.position = 'fixed';
+            toast.style.bottom = '24px';
+            toast.style.right = '24px';
+            toast.style.backgroundColor = '#1f2937';
+            toast.style.color = '#f9fafb';
+            toast.style.border = '1px solid rgba(99, 102, 241, 0.4)';
+            toast.style.borderRadius = '12px';
+            toast.style.padding = '12px 18px';
+            toast.style.fontSize = '0.86rem';
+            toast.style.boxShadow = '0 10px 30px rgba(0,0,0,0.6)';
+            toast.style.zIndex = '9999';
+            toast.style.animation = 'fadeIn 0.3s ease-out';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.4s ease';
+                setTimeout(() => toast.remove(), 400);
+            }, 4000);
+        }
+
         // ----------------------------------------------------
         // Multi-Account Management API
         // ----------------------------------------------------
@@ -1276,6 +1300,10 @@
                 const data = await res.json();
                 const accounts = data.accounts || [];
                 activeAccountEmail = data.active_account;
+
+                if (data.notice) {
+                    showNotification(data.notice);
+                }
 
                 dropdownAccountsList.innerHTML = '';
 

@@ -660,6 +660,8 @@ async def auth_callback(request: Request):
 
         # Store in multi-account dictionary
         accounts = get_accounts_dict(request)
+        already_connected = email in accounts
+
         accounts[email] = {
             "token": credentials.token,
             "refresh_token": credentials.refresh_token,
@@ -674,6 +676,11 @@ async def auth_callback(request: Request):
         request.session["accounts"] = accounts
         request.session["active_account"] = email
 
+        if already_connected:
+            request.session["account_notice"] = f"ℹ️ Account '{email}' was already logged in. It is now set as the active account."
+        else:
+            request.session["account_notice"] = f"✅ Successfully connected new Google account: '{email}'."
+
         # Top-level sync
         request.session["user_email"] = email
         request.session["user_name"] = name
@@ -683,7 +690,7 @@ async def auth_callback(request: Request):
         # Clear transient OAuth state
         request.session.pop("oauth_state", None)
 
-        logger.info(f"Google Account '{email}' successfully connected & set as active.")
+        logger.info(f"Google Account '{email}' successfully connected (already_connected={already_connected}) & set as active.")
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     except Exception as e:
@@ -732,7 +739,7 @@ class SwitchAccountRequest(BaseModel):
 
 @app.get("/api/accounts")
 async def list_accounts_endpoint(request: Request):
-    """Returns all connected Google accounts and marks the currently active one."""
+    """Returns all connected Google accounts, marks active one, and returns any flash notice."""
     active_email = get_active_account_email(request)
     if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
@@ -747,9 +754,11 @@ async def list_accounts_endpoint(request: Request):
             "is_active": (email == active_email),
         })
 
+    notice = request.session.pop("account_notice", None)
     return JSONResponse({
         "active_account": active_email,
         "accounts": account_list,
+        "notice": notice,
     })
 
 
