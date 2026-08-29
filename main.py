@@ -488,36 +488,130 @@ async def create_event_tool(
     description: str = "",
     location: str = "",
     attendees: Optional[List[str]] = None,
+    ignore_conflicts: bool = False,
 ) -> str:
-    """Creates a new event on user's primary Google Calendar after asynchronous conflict checking in IST."""
+    """
+    Creates a new event on user's primary Google Calendar with smart conflict detection and automated alternative slot suggestions in IST.
+    """
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
+        tz = ZoneInfo(CALENDAR_TIMEZONE)
 
         # Normalize start_time and end_time to ensure explicit Indian Standard Time (+05:30) offset
-        norm_start = normalize_iso_datetime(start_time)
-        norm_end = normalize_iso_datetime(end_time)
+        norm_start = normalize_iso_datetime(start_time, CALENDAR_TIMEZONE)
+        norm_end = normalize_iso_datetime(end_time, CALENDAR_TIMEZONE)
 
-        # Conflict checking in the target time window asynchronously
-        conflict_msg = ""
         try:
-            overlap_check = await asyncio.to_thread(
+            req_start = datetime.fromisoformat(norm_start)
+            req_end = datetime.fromisoformat(norm_end)
+        except Exception:
+            req_start = datetime.now(tz)
+            req_end = req_start + timedelta(hours=1)
+            norm_start = req_start.isoformat()
+            norm_end = req_end.isoformat()
+
+        if req_end <= req_start:
+            req_end = req_start + timedelta(hours=1)
+            norm_end = req_end.isoformat()
+
+        duration = req_end - req_start
+
+        # 1. Smart Conflict Detection & Alternative Slot Search (unless ignore_conflicts is requested)
+        if not ignore_conflicts:
+            search_window_start = req_start.replace(hour=0, minute=0, second=0, microsecond=0)
+            search_window_end = (req_start + timedelta(days=2)).replace(hour=23, minute=59, second=59, microsecond=0)
+
+            events_result = await asyncio.to_thread(
                 service.events()
                 .list(
                     calendarId="primary",
-                    timeMin=norm_start,
-                    timeMax=norm_end,
+                    timeMin=search_window_start.isoformat(),
+                    timeMax=search_window_end.isoformat(),
                     singleEvents=True,
+                    orderBy="startTime",
                 )
                 .execute
             )
-            conflicts = overlap_check.get("items", [])
-            if conflicts:
-                conflict_names = [f"'{c.get('summary', 'Untitled')}'" for c in conflicts]
-                conflict_msg = f"⚠️ Conflict Notice: You already have event(s) during this time: {', '.join(conflict_names)}."
-        except Exception as check_err:
-            logger.warning(f"Conflict check warning: {check_err}")
+            existing_events = events_result.get("items", [])
 
-        # Construct event payload with explicit timeZone set to Asia/Kolkata
+            # Check direct overlaps with requested [req_start, req_end]
+            conflicts = []
+            parsed_existing = []
+            for ev in existing_events:
+                s_raw = ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date")
+                e_raw = ev.get("end", {}).get("dateTime") or ev.get("end", {}).get("date")
+                if not s_raw or not e_raw:
+                    continue
+
+                try:
+                    s_dt = datetime.fromisoformat(normalize_iso_datetime(s_raw, CALENDAR_TIMEZONE))
+                    e_dt = datetime.fromisoformat(normalize_iso_datetime(e_raw, CALENDAR_TIMEZONE))
+                    parsed_existing.append((s_dt, e_dt, ev))
+
+                    # Direct overlap condition: (s_dt < req_end) and (e_dt > req_start)
+                    if s_dt < req_end and e_dt > req_start:
+                        conflicts.append((ev.get("summary", "Busy / Untitled Event"), s_dt, e_dt))
+                except Exception as parse_err:
+                    logger.debug(f"Error parsing existing event date: {parse_err}")
+
+            if conflicts:
+                # Conflicting event found! Build suggestions for next available free slots
+                primary_conf_name, conf_start, conf_end = conflicts[0]
+                conf_time_str = f"{conf_start.strftime('%I:%M %p')} - {conf_end.strftime('%I:%M %p')}"
+
+                now_ist = datetime.now(tz)
+                alternative_slots = []
+
+                # Candidate days to check: same day + next 2 days
+                candidate_days = [req_start.date(), (req_start + timedelta(days=1)).date(), (req_start + timedelta(days=2)).date()]
+
+                for cand_date in candidate_days:
+                    if len(alternative_slots) >= 3:
+                        break
+
+                    # Search between 9:00 AM and 7:00 PM IST
+                    day_start = datetime(cand_date.year, cand_date.month, cand_date.day, 9, 0, 0, tzinfo=tz)
+                    day_end = datetime(cand_date.year, cand_date.month, cand_date.day, 19, 0, 0, tzinfo=tz)
+
+                    current_slot_start = day_start
+                    while current_slot_start + duration <= day_end:
+                        current_slot_end = current_slot_start + duration
+
+                        # Must be in the future
+                        if current_slot_start > now_ist:
+                            # Check if this candidate slot overlaps with ANY existing event
+                            has_overlap = False
+                            for s_dt, e_dt, _ in parsed_existing:
+                                if s_dt < current_slot_end and e_dt > current_slot_start:
+                                    has_overlap = True
+                                    break
+
+                            # Also must not be identical to the requested slot that conflicted
+                            if not has_overlap and (current_slot_start != req_start):
+                                day_label = "Today" if cand_date == now_ist.date() else ("Tomorrow" if cand_date == (now_ist + timedelta(days=1)).date() else cand_date.strftime("%a, %b %d"))
+                                slot_formatted = f"{current_slot_start.strftime('%I:%M %p')} - {current_slot_end.strftime('%I:%M %p')} IST ({day_label})"
+                                alternative_slots.append({
+                                    "start_time": current_slot_start.isoformat(),
+                                    "end_time": current_slot_end.isoformat(),
+                                    "formatted": slot_formatted,
+                                })
+                                if len(alternative_slots) >= 3:
+                                    break
+
+                        current_slot_start += timedelta(minutes=30)
+
+                conflict_response = {
+                    "status": "conflict_detected",
+                    "message": f"Conflict detected! You already have '{primary_conf_name}' scheduled from {conf_time_str} on {req_start.strftime('%b %d, %Y')}.",
+                    "conflicting_event": primary_conf_name,
+                    "conflicting_time": conf_time_str,
+                    "requested_slot": f"{req_start.strftime('%I:%M %p')} - {req_end.strftime('%I:%M %p')} on {req_start.strftime('%b %d, %Y')}",
+                    "alternative_slots": alternative_slots,
+                    "suggestion": "Inform user of the conflict and ask if they would like to schedule at one of these alternative slots or force schedule anyway.",
+                }
+                return json.dumps(conflict_response, indent=2)
+
+        # 2. Insert event if no conflict or if ignore_conflicts=True
         event_body: Dict[str, Any] = {
             "summary": summary,
             "description": description or "Scheduled via AI Calendar Agent",
@@ -550,7 +644,6 @@ async def create_event_tool(
             "end": norm_end,
             "timeZone": CALENDAR_TIMEZONE,
             "location": location,
-            "conflict_warning": conflict_msg if conflict_msg else None,
         }
         return json.dumps(result, indent=2)
 
@@ -1126,8 +1219,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             description: str = "",
             location: str = "",
             attendees: Optional[List[str]] = None,
+            ignore_conflicts: bool = False,
         ) -> str:
-            """Create a new Google Calendar event with conflict checking asynchronously."""
+            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection and automated alternative slot suggestions."""
             return await create_event_tool(
                 user_creds,
                 summary=summary,
@@ -1136,6 +1230,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 description=description,
                 location=location,
                 attendees=attendees,
+                ignore_conflicts=ignore_conflicts,
             )
 
         async def delete_calendar_event_wrapper(
@@ -1159,7 +1254,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             StructuredTool.from_function(
                 coroutine=create_event_wrapper,
                 name="create_event",
-                description="Create Google Calendar event in Indian Standard Time (IST). start_time and end_time must be ISO 8601 strings.",
+                description="Create Google Calendar event in IST (+05:30). Returns conflict details and alternative slots if time is occupied. Set ignore_conflicts=True to force schedule.",
             ),
             StructuredTool.from_function(
                 coroutine=delete_calendar_event_wrapper,
@@ -1175,22 +1270,30 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST)
+        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST) & Smart Conflict Handling
         system_prompt = (
-            "System Directive: You are a high-speed calendar AI assistant. Be extremely concise, direct, and brief. "
+            "System Directive: You are a high-speed calendar AI assistant. Be concise, direct, and helpful. "
             f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
             f"All relative and absolute times mentioned by the user MUST be interpreted in IST ('{CALENDAR_TIMEZONE}'). "
-            "Perform tool calls immediately without conversational filler or lengthy intros/outros.\n\n"
+            "Perform tool calls immediately without conversational filler.\n\n"
             f"Active Account: {active_email}\n"
             f"Current Local DateTime: {current_time_str} (ISO: {current_iso_str})\n"
             f"Default Timezone: {CALENDAR_TIMEZONE} (UTC+5:30)\n\n"
             "Instructions:\n"
             "1. When user asks about schedule or availability, call `list_events` with time_min relative to Current Local DateTime.\n"
-            "2. When user asks to create/schedule an event (e.g., '3 PM meeting tomorrow'), compute start_time and end_time in IST with '+05:30' offset (e.g., '2026-08-30T15:00:00+05:30') and call `create_event`.\n"
-            "3. Give a 1-sentence confirmation with the event title, start/end time in IST, clickable link, and delete button.\n"
-            "4. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
-            "5. When creating or listing events, include the delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
-            "6. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
+            "2. When user asks to create/schedule an event (e.g., '3 PM meeting tomorrow'):\n"
+            "   - Compute start_time and end_time in IST with '+05:30' offset and call `create_event`.\n"
+            "   - If `create_event` returns `conflict_detected`:\n"
+            "     * Inform the user clearly: \"You already have '[Conflicting Event]' scheduled at [Time].\"\n"
+            "     * Present the alternative slots cleanly as numbered options: \"Would you like me to schedule '[New Event]' at one of these alternative times instead?\"\n"
+            "       - Option 1: [Slot 1]\n"
+            "       - Option 2: [Slot 2]\n"
+            "       - Option 3: [Slot 3]\n"
+            "     * If user picks an alternative slot, call `create_event` with that slot.\n"
+            "     * If user says 'Schedule anyway' or 'Force schedule', call `create_event` with `ignore_conflicts=True`.\n"
+            "   - If `create_event` succeeds, give a 1-sentence confirmation with event title, start/end time in IST, clickable link, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "3. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
+            "4. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
         )
 
         # 4. Initialize Gemini LLM with active Google AI models
