@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Calendar Agent - Smart Scheduling & Gmail Assistant</title>
-    <meta name="description" content="AI Calendar Agent: Manage your Google Calendar and Gmail invitations with Gemini AI.">
+    <meta name="description" content="AI Calendar Agent: Manage, schedule, and delete Google Calendar events and scan Gmail invitations with Gemini AI.">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -763,7 +763,7 @@
         }
 
         .message-body {
-            max-width: 82%;
+            max-width: 84%;
             display: flex;
             flex-direction: column;
             gap: 0.25rem;
@@ -798,6 +798,38 @@
 
         .message-row.user .message-time {
             text-align: right;
+        }
+
+        /* Calendar Delete Button */
+        .btn-delete-event {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(239, 68, 68, 0.12);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 5px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 6px 0 4px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-delete-event:hover {
+            background: #ef4444;
+            color: #ffffff;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-delete-event:disabled {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border-color: transparent;
+            cursor: not-allowed;
+            transform: none;
         }
 
         /* Markdown Styles */
@@ -1075,7 +1107,7 @@
                             <i class="fa-solid fa-robot"></i>
                         </div>
                         <h1 class="welcome-title">How can I assist your schedule?</h1>
-                        <p class="welcome-subtitle">I can create Google Calendar events, find scheduling conflicts, and check your Gmail inbox for meeting invitations.</p>
+                        <p class="welcome-subtitle">I can create and delete Google Calendar events, find conflicts, and scan your Gmail for invitations.</p>
 
                         <div class="prompt-grid">
                             <div class="prompt-card" onclick="sendPrompt('What upcoming events do I have on my calendar this week?')">
@@ -1107,7 +1139,7 @@
                     <textarea 
                         id="chat-input" 
                         class="chat-input" 
-                        placeholder="Message AI Calendar Agent (e.g., 'Schedule lunch tomorrow at 12 PM')..." 
+                        placeholder="Message AI Calendar Agent (e.g., 'Schedule lunch tomorrow at 12 PM', 'Delete meeting tomorrow')..." 
                         rows="1"></textarea>
                     <button class="btn-send" id="btn-send" title="Send Message">
                         <i class="fa-solid fa-paper-plane"></i>
@@ -1215,7 +1247,10 @@
             messageRow.className = `message-row ${sender}`;
 
             if (sender === 'assistant') {
-                const cleanHtml = DOMPurify.sanitize(marked.parse(rawString));
+                const cleanHtml = DOMPurify.sanitize(marked.parse(rawString), {
+                    ADD_TAGS: ['button', 'i', 'span'],
+                    ADD_ATTR: ['onclick', 'data-event-id', 'class', 'target']
+                });
                 messageRow.innerHTML = `
                     <div class="message-avatar assistant">
                         <i class="fa-solid fa-robot"></i>
@@ -1289,6 +1324,59 @@
                 setTimeout(() => toast.remove(), 400);
             }, 4000);
         }
+
+        // ----------------------------------------------------
+        // Direct Calendar Event Deletion
+        // ----------------------------------------------------
+        async function deleteCalendarEvent(eventId, btn) {
+            if (!eventId) return;
+            if (!confirm("Are you sure you want to delete this event from your Google Calendar?")) return;
+
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Deleting...';
+            }
+
+            try {
+                const res = await fetch('/api/calendar/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ event_id: eventId })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.status === 'success') {
+                    showNotification("✅ Event deleted from your Google Calendar!");
+                    if (btn) {
+                        btn.innerHTML = '<i class="fa-solid fa-check"></i> Deleted';
+                        btn.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+                        btn.style.color = '#34d399';
+                        btn.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+                    }
+                } else {
+                    showNotification("⚠️ Failed to delete event: " + (data.message || "Unknown error"));
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fa-solid fa-trash-can"></i> Retry Delete';
+                    }
+                }
+            } catch (err) {
+                showNotification("⚠️ Network error deleting event: " + err.message);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-trash-can"></i> Retry Delete';
+                }
+            }
+        }
+
+        // Event delegation for dynamic delete buttons
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.btn-delete-event');
+            if (btn && btn.getAttribute('data-event-id')) {
+                const eventId = btn.getAttribute('data-event-id');
+                deleteCalendarEvent(eventId, btn);
+            }
+        });
 
         // ----------------------------------------------------
         // Multi-Account Management API

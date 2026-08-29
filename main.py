@@ -497,6 +497,80 @@ async def create_event_tool(
         return f"Failed to create event: {str(e)}"
 
 
+async def delete_calendar_event_tool(
+    creds: Credentials,
+    event_id: Optional[str] = None,
+    summary: Optional[str] = None,
+    time_min: Optional[str] = None,
+) -> str:
+    """
+    Deletes a calendar event from the user's primary Google Calendar.
+    Accepts either an explicit event_id or searches by title/summary.
+    """
+    try:
+        service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
+
+        target_id = event_id.strip() if event_id else None
+        target_summary = summary or ""
+
+        if not target_id:
+            if not summary:
+                return "Please specify either an event_id or the title/summary of the event you would like to delete."
+
+            search_time_min = time_min or datetime.now(timezone.utc).isoformat()
+            events_result = await asyncio.to_thread(
+                service.events()
+                .list(
+                    calendarId="primary",
+                    q=summary,
+                    timeMin=search_time_min,
+                    maxResults=5,
+                    singleEvents=True,
+                )
+                .execute
+            )
+            items = events_result.get("items", [])
+            if not items:
+                # Fallback search without time constraint
+                events_result = await asyncio.to_thread(
+                    service.events()
+                    .list(
+                        calendarId="primary",
+                        q=summary,
+                        maxResults=5,
+                        singleEvents=True,
+                    )
+                    .execute
+                )
+                items = events_result.get("items", [])
+
+            if not items:
+                return f"Could not find any calendar event matching '{summary}' to delete."
+
+            matched_event = items[0]
+            target_id = matched_event["id"]
+            target_summary = matched_event.get("summary", summary)
+
+        # Delete event
+        await asyncio.to_thread(
+            service.events().delete(calendarId="primary", eventId=target_id).execute
+        )
+
+        result = {
+            "status": "success",
+            "message": f"Successfully deleted event '{target_summary}' (ID: {target_id}) from Google Calendar.",
+            "event_id": target_id,
+        }
+        return json.dumps(result, indent=2)
+
+    except HttpError as err:
+        logger.error(f"Google Calendar Delete Error: {err}")
+        return f"Error deleting calendar event: {err}"
+    except Exception as e:
+        logger.error(f"Unexpected error in delete_calendar_event: {e}")
+        return f"Failed to delete event: {str(e)}"
+
+
 async def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
     """
     Searches unread emails for meeting, tea, coffee, or sync invitations.
@@ -831,7 +905,51 @@ async def remove_account_endpoint(request: Request, body: SwitchAccountRequest):
 
 
 # ---------------------------------------------------------------------------
-# 8. Chat History API Endpoints
+# 8. Calendar Event Direct API Endpoints
+# ---------------------------------------------------------------------------
+class DeleteEventRequest(BaseModel):
+    event_id: str
+
+
+@app.post("/api/calendar/delete")
+async def delete_calendar_event_endpoint(request: Request, body: DeleteEventRequest):
+    """
+    Direct API endpoint to delete a Google Calendar event by ID
+    using the active account's credentials.
+    """
+    user_creds = get_user_credentials(request)
+    if not user_creds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized. Please sign in.")
+
+    event_id = body.event_id.strip()
+    if not event_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="event_id is required.")
+
+    try:
+        service = await asyncio.to_thread(build, "calendar", "v3", credentials=user_creds, static_discovery=False)
+        await asyncio.to_thread(service.events().delete(calendarId="primary", eventId=event_id).execute)
+        logger.info(f"Direct API deleted calendar event: {event_id}")
+        return JSONResponse({
+            "status": "success",
+            "message": "Event deleted successfully",
+            "event_id": event_id
+        })
+    except HttpError as err:
+        logger.error(f"Google Calendar Delete API error: {err}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"status": "error", "message": str(err)}
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in delete_calendar_event_endpoint: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"status": "error", "message": str(e)}
+        )
+
+
+# ---------------------------------------------------------------------------
+# 9. Chat History API Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/api/history")
 async def get_history_endpoint(request: Request):
@@ -884,7 +1002,7 @@ async def clear_all_history_endpoint(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# 9. AI Agent Runner & LangChain Integration
+# 10. AI Agent Runner & LangChain Integration
 # ---------------------------------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
@@ -897,7 +1015,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     High-Performance AI Chatbot endpoint:
     - Validates active user authentication.
     - Manages SQLite chat sessions and message persistence.
-    - Binds asynchronous Google Calendar & Gmail tools with static discovery.
+    - Binds asynchronous Google Calendar & Gmail tools with event creation & deletion.
     - Runs Gemini 3.6 Flash / 3.5 Flash with sub-second execution.
     """
     user_creds = get_user_credentials(request)
@@ -966,6 +1084,14 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 attendees=attendees,
             )
 
+        async def delete_calendar_event_wrapper(
+            event_id: Optional[str] = None,
+            summary: Optional[str] = None,
+            time_min: Optional[str] = None,
+        ) -> str:
+            """Delete an event from user's primary Google Calendar by event_id or title."""
+            return await delete_calendar_event_tool(user_creds, event_id=event_id, summary=summary, time_min=time_min)
+
         async def check_gmail_invites_wrapper(max_results: int = 10) -> str:
             """Scan unread Gmail messages for meeting, coffee, or tea invites in parallel."""
             return await check_gmail_invites_tool(user_creds, max_results=max_results)
@@ -980,6 +1106,11 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 coroutine=create_event_wrapper,
                 name="create_event",
                 description="Create a new event on Google Calendar with conflict checking. start_time and end_time must be ISO 8601 strings (e.g. 'YYYY-MM-DDTHH:MM:SS').",
+            ),
+            StructuredTool.from_function(
+                coroutine=delete_calendar_event_wrapper,
+                name="delete_calendar_event",
+                description="Delete an existing event from Google Calendar using event_id, or search by summary/title and approximate time.",
             ),
             StructuredTool.from_function(
                 coroutine=check_gmail_invites_wrapper,
@@ -1003,9 +1134,13 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "   - Calculate start_time and end_time (defaulting to 1 hour duration if unspecified) relative to Current DateTime.\n"
             "   - Format start_time and end_time as ISO 8601 strings (e.g. 'YYYY-MM-DDTHH:MM:SS').\n"
             "   - Call `create_event` with summary, start_time, end_time, description, location, and attendees.\n"
-            "   - Inform the user of successful creation with title, start/end time, location, and include the clickable Google Calendar link.\n"
-            "4. When the user asks about emails, tea, coffee, or meeting invitations, call `check_gmail_invites` and summarize relevant findings with clear options to schedule them.\n"
-            "5. Format output using clean Markdown, bullet points, and nice styling. Include clickable links if available."
+            "   - Inform the user of successful creation with title, start/end time, location, clickable Google Calendar link, and include the event ID.\n"
+            "4. When the user asks to delete, cancel, or remove an event (e.g., 'Delete my 3 PM meeting tomorrow' or 'Cancel event Team Sync'):\n"
+            "   - Call `delete_calendar_event` with the event_id if known, or summary/title and approximate time.\n"
+            "   - Confirm the deletion clearly with the event title.\n"
+            "5. When listing or creating events, include a clean delete button format next to each event: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete Event</button>` so the user can delete it with a single click.\n"
+            "6. When the user asks about emails, tea, coffee, or meeting invitations, call `check_gmail_invites` and summarize relevant findings with clear options to schedule them.\n"
+            "7. Format output using clean Markdown, bullet points, and nice styling. Include clickable links if available."
         )
 
         # 4. Initialize Gemini LLM with active Google AI models

@@ -56,6 +56,11 @@ def test_endpoints():
     assert res_del.status_code == 401, f"Expected 401 Unauthorized, got {res_del.status_code}"
     print("[PASS] DELETE /api/history (401 Unauthorized)", flush=True)
 
+    print("Testing POST /api/calendar/delete (Unauthenticated Guard)...", flush=True)
+    res_cal_del = client.post("/api/calendar/delete", json={"event_id": "test_123"})
+    assert res_cal_del.status_code == 401, f"Expected 401 Unauthorized, got {res_cal_del.status_code}"
+    print("[PASS] POST /api/calendar/delete (401 Unauthorized)", flush=True)
+
     print("Testing GET /logout (Redirect to /login)...", flush=True)
     res_logout = client.get("/logout", follow_redirects=False)
     assert res_logout.status_code == 303, f"Expected 303 See Other, got {res_logout.status_code}"
