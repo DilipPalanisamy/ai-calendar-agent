@@ -308,18 +308,23 @@ def get_client_config() -> Dict[str, Any]:
 
 
 def get_redirect_uri(request: Request) -> str:
-    """Dynamically determine the OAuth callback redirect URI."""
-    if RENDER_EXTERNAL_URL and RENDER_EXTERNAL_URL != "http://localhost:8000":
+    """
+    Dynamically determine the OAuth callback redirect URI.
+    Enforces HTTPS when running on production (Render, onrender.com, or behind reverse proxies).
+    """
+    if RENDER_EXTERNAL_URL and "onrender.com" in RENDER_EXTERNAL_URL and RENDER_EXTERNAL_URL != "http://localhost:8000":
         base = RENDER_EXTERNAL_URL.rstrip("/")
         return f"{base}/auth/callback"
 
-    # Handle proxy SSL on Render / Cloud Load Balancers
-    if request.headers.get("x-forwarded-proto") == "https":
-        url = str(request.url_for("auth_callback"))
-        if url.startswith("http://"):
-            return url.replace("http://", "https://", 1)
-
-    return str(request.url_for("auth_callback"))
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost:8000"
+    scheme = (
+        "https"
+        if "onrender.com" in host
+        or request.headers.get("x-forwarded-proto") == "https"
+        or request.url.scheme == "https"
+        else "http"
+    )
+    return f"{scheme}://{host}/auth/callback"
 
 
 def get_accounts_dict(request: Request) -> Dict[str, Any]:
