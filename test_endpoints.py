@@ -36,6 +36,16 @@ def test_endpoints():
     assert res_chat.status_code == 401, f"Expected 401 Unauthorized, got {res_chat.status_code}"
     print("[PASS] POST /api/chat (401 Unauthorized)", flush=True)
 
+    print("Testing GET /api/accounts (Unauthenticated Guard)...", flush=True)
+    res_acc = client.get("/api/accounts")
+    assert res_acc.status_code == 401, f"Expected 401 Unauthorized, got {res_acc.status_code}"
+    print("[PASS] GET /api/accounts (401 Unauthorized)", flush=True)
+
+    print("Testing POST /api/accounts/switch (Unauthenticated Guard)...", flush=True)
+    res_sw = client.post("/api/accounts/switch", json={"email": "test@gmail.com"})
+    assert res_sw.status_code == 404 or res_sw.status_code == 401, f"Expected 404/401, got {res_sw.status_code}"
+    print("[PASS] POST /api/accounts/switch (Guarded)", flush=True)
+
     print("Testing GET /api/history (Unauthenticated Guard)...", flush=True)
     res_hist = client.get("/api/history")
     assert res_hist.status_code == 401, f"Expected 401 Unauthorized, got {res_hist.status_code}"
@@ -84,7 +94,7 @@ def test_endpoints():
     print("[PASS] SQLite Chat History CRUD tests completed successfully!", flush=True)
 
     print("\n==========================================", flush=True)
-    print("ALL FASTAPI & SQLITE ENDPOINT TESTS PASSED 100%!", flush=True)
+    print("ALL FASTAPI & MULTI-ACCOUNT TESTS PASSED 100%!", flush=True)
     print("==========================================", flush=True)
 
 if __name__ == "__main__":

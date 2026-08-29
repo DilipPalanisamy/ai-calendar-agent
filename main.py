@@ -204,8 +204,8 @@ def delete_all_user_sessions(user_email: str) -> int:
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="AI Calendar Agent",
-    description="Multi-user AI Calendar & Gmail Assistant powered by Gemini & FastAPI",
-    version="2.1.0",
+    description="Multi-user & Multi-Account AI Calendar & Gmail Assistant powered by Gemini & FastAPI",
+    version="2.2.0",
 )
 
 # Check if running in production / Render HTTPS
@@ -236,7 +236,7 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# 4. Google OAuth 2.0 Helper Functions
+# 4. Multi-Account Google OAuth 2.0 Helper Functions
 # ---------------------------------------------------------------------------
 def get_client_config() -> Dict[str, Any]:
     """Retrieve Google OAuth Client configuration from env vars or credentials.json fallback."""
@@ -285,14 +285,57 @@ def get_redirect_uri(request: Request) -> str:
     return str(request.url_for("auth_callback"))
 
 
+def get_accounts_dict(request: Request) -> Dict[str, Any]:
+    """
+    Retrieves the multi-account dictionary from session.
+    Automatically migrates legacy single-account sessions if present.
+    """
+    accounts = request.session.get("accounts")
+    if isinstance(accounts, dict) and accounts:
+        return accounts
+
+    # Migration / Fallback for existing single-user sessions
+    legacy_creds = request.session.get("user_creds")
+    legacy_email = request.session.get("user_email")
+    if legacy_creds and legacy_email:
+        acc_entry = dict(legacy_creds)
+        acc_entry["name"] = request.session.get("user_name", legacy_email)
+        acc_entry["picture"] = request.session.get("user_picture", "")
+        accounts = {legacy_email: acc_entry}
+        request.session["accounts"] = accounts
+        request.session["active_account"] = legacy_email
+        return accounts
+
+    return {}
+
+
+def get_active_account_email(request: Request) -> Optional[str]:
+    """Retrieves the active account email, defaulting to the first connected account."""
+    accounts = get_accounts_dict(request)
+    if not accounts:
+        return None
+
+    active_email = request.session.get("active_account")
+    if active_email and active_email in accounts:
+        return active_email
+
+    # Default to first connected account
+    first_email = next(iter(accounts.keys()))
+    request.session["active_account"] = first_email
+    return first_email
+
+
 def get_user_credentials(request: Request) -> Optional[Credentials]:
     """
-    Dynamically deserialize and refresh the active user's Google OAuth Credentials
-    from the current session.
+    Dynamically deserializes and refreshes the credentials for the CURRENT ACTIVE account.
+    Updates the session dictionary if tokens are refreshed.
     """
-    creds_data = request.session.get("user_creds")
-    if not creds_data:
+    accounts = get_accounts_dict(request)
+    active_email = get_active_account_email(request)
+    if not active_email or active_email not in accounts:
         return None
+
+    creds_data = accounts[active_email]
 
     try:
         creds = Credentials(
@@ -306,20 +349,23 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
 
         # Refresh token automatically if expired
         if creds.expired and creds.refresh_token:
-            logger.info("Access token expired. Refreshing token via Google OAuth...")
+            logger.info(f"Access token expired for '{active_email}'. Refreshing...")
             creds.refresh(GoogleRequest())
-            request.session["user_creds"] = {
-                "token": creds.token,
-                "refresh_token": creds.refresh_token,
-                "token_uri": creds.token_uri,
-                "client_id": creds.client_id,
-                "client_secret": creds.client_secret,
-                "scopes": creds.scopes,
-            }
+            creds_data["token"] = creds.token
+            creds_data["refresh_token"] = creds.refresh_token
+            creds_data["token_uri"] = creds.token_uri
+            accounts[active_email] = creds_data
+            request.session["accounts"] = accounts
+
+        # Sync top-level session helper variables for template rendering
+        request.session["user_email"] = active_email
+        request.session["user_name"] = creds_data.get("name", active_email)
+        request.session["user_picture"] = creds_data.get("picture", "")
+        request.session["user_creds"] = creds_data
 
         return creds
     except Exception as e:
-        logger.error(f"Error loading user credentials: {e}")
+        logger.error(f"Error loading credentials for '{active_email}': {e}")
         return None
 
 
@@ -327,7 +373,7 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
 # 5. Multi-User Google Tool Functions
 # ---------------------------------------------------------------------------
 def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_results: int = 15) -> str:
-    """Lists upcoming events from the user's primary Google Calendar."""
+    """Lists upcoming events from the active Google Calendar."""
     try:
         service = build("calendar", "v3", credentials=creds)
         if not time_min:
@@ -386,10 +432,7 @@ def create_event_tool(
     location: str = "",
     attendees: Optional[List[str]] = None,
 ) -> str:
-    """
-    Creates a new event on user's primary Google Calendar after conflict checking.
-    start_time and end_time can be ISO 8601 strings (e.g. '2026-08-30T15:00:00' or with timezone offset).
-    """
+    """Creates a new event on user's primary Google Calendar after conflict checking."""
     try:
         service = build("calendar", "v3", credentials=creds)
 
@@ -494,12 +537,13 @@ def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 6. Google OAuth 2.0 & Authentication Endpoints
+# 6. Google OAuth 2.0 & Multi-Account Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Serves the dedicated Login/Sign Up page for unauthenticated users."""
-    if request.session.get("user_creds") and request.session.get("user_email"):
+    active_email = get_active_account_email(request)
+    if active_email:
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     try:
@@ -516,7 +560,6 @@ async def auth_login(request: Request):
         client_config = get_client_config()
         redirect_uri = get_redirect_uri(request)
 
-        # Explicitly disable PKCE verification for standard server-side OAuth
         flow = Flow.from_client_config(
             client_config=client_config,
             scopes=SCOPES,
@@ -541,9 +584,46 @@ async def auth_login(request: Request):
         )
 
 
+@app.get("/auth/add-account", response_class=RedirectResponse)
+async def auth_add_account(request: Request):
+    """Initiates OAuth consent flow to connect an additional Google account."""
+    try:
+        client_config = get_client_config()
+        redirect_uri = get_redirect_uri(request)
+
+        flow = Flow.from_client_config(
+            client_config=client_config,
+            scopes=SCOPES,
+            redirect_uri=redirect_uri,
+            autogenerate_code_verifier=False,
+        )
+
+        # Prompt user to choose or log in with another account
+        authorization_url, state = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="select_account consent",
+        )
+
+        request.session["oauth_state"] = state
+        return RedirectResponse(url=authorization_url)
+
+    except Exception as e:
+        logger.error(f"Add account initiation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate account connection: {str(e)}",
+        )
+
+
 @app.get("/auth/callback", name="auth_callback")
 async def auth_callback(request: Request):
-    """Handles OAuth callback, exchanges code for credentials, and stores in session."""
+    """
+    Handles OAuth callback:
+    - Exchanges authorization code for tokens.
+    - Stores credentials inside the multi-account dictionary in session.
+    - Sets newly authenticated account as active and redirects to /.
+    """
     state = request.session.get("oauth_state")
     code = request.query_params.get("code")
 
@@ -554,7 +634,6 @@ async def auth_callback(request: Request):
         client_config = get_client_config()
         redirect_uri = get_redirect_uri(request)
 
-        # Explicitly disable PKCE verification
         flow = Flow.from_client_config(
             client_config=client_config,
             scopes=SCOPES,
@@ -563,12 +642,11 @@ async def auth_callback(request: Request):
             autogenerate_code_verifier=False,
         )
 
-        # Fix scheme mismatch when behind HTTPS reverse proxies (Render / Cloudflare)
+        # Fix scheme mismatch behind SSL reverse proxies
         auth_response_url = str(request.url)
         if redirect_uri.startswith("https://") and auth_response_url.startswith("http://"):
             auth_response_url = auth_response_url.replace("http://", "https://", 1)
 
-        # Exchange authorization code for tokens
         flow.fetch_token(authorization_response=auth_response_url)
         credentials = flow.credentials
 
@@ -580,23 +658,32 @@ async def auth_callback(request: Request):
         name = user_info.get("name", email)
         picture = user_info.get("picture", "")
 
-        # Store credentials and user profile in session
-        request.session["user_email"] = email
-        request.session["user_name"] = name
-        request.session["user_picture"] = picture
-        request.session["user_creds"] = {
+        # Store in multi-account dictionary
+        accounts = get_accounts_dict(request)
+        accounts[email] = {
             "token": credentials.token,
             "refresh_token": credentials.refresh_token,
             "token_uri": credentials.token_uri,
             "client_id": credentials.client_id,
             "client_secret": credentials.client_secret,
             "scopes": credentials.scopes,
+            "name": name,
+            "picture": picture,
         }
+
+        request.session["accounts"] = accounts
+        request.session["active_account"] = email
+
+        # Top-level sync
+        request.session["user_email"] = email
+        request.session["user_name"] = name
+        request.session["user_picture"] = picture
+        request.session["user_creds"] = accounts[email]
 
         # Clear transient OAuth state
         request.session.pop("oauth_state", None)
 
-        logger.info(f"User '{email}' successfully signed in via Google OAuth.")
+        logger.info(f"Google Account '{email}' successfully connected & set as active.")
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     except Exception as e:
@@ -609,53 +696,151 @@ async def auth_callback(request: Request):
 
 @app.get("/logout")
 async def logout(request: Request):
-    """Clears user session and logs out to /login."""
-    user_email = request.session.get("user_email")
+    """Clears all user sessions and accounts and redirects to /login."""
+    active_email = get_active_account_email(request)
     request.session.clear()
-    if user_email:
-        logger.info(f"User '{user_email}' logged out.")
+    if active_email:
+        logger.info(f"User '{active_email}' and all accounts logged out.")
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/api/me")
 async def get_current_user(request: Request):
-    """Returns current user profile and authentication status."""
-    user_creds = request.session.get("user_creds")
-    if not user_creds:
+    """Returns current active user profile and connected accounts metadata."""
+    active_email = get_active_account_email(request)
+    if not active_email:
         return JSONResponse({"authenticated": False})
+
+    accounts = get_accounts_dict(request)
+    active_data = accounts.get(active_email, {})
 
     return JSONResponse({
         "authenticated": True,
-        "email": request.session.get("user_email", ""),
-        "name": request.session.get("user_name", "User"),
-        "picture": request.session.get("user_picture", ""),
+        "email": active_email,
+        "name": active_data.get("name", active_email),
+        "picture": active_data.get("picture", ""),
+        "total_accounts": len(accounts),
     })
 
 
 # ---------------------------------------------------------------------------
-# 7. Chat History API Endpoints
+# 7. Multi-Account Management API Endpoints
+# ---------------------------------------------------------------------------
+class SwitchAccountRequest(BaseModel):
+    email: str
+
+
+@app.get("/api/accounts")
+async def list_accounts_endpoint(request: Request):
+    """Returns all connected Google accounts and marks the currently active one."""
+    active_email = get_active_account_email(request)
+    if not active_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
+
+    accounts = get_accounts_dict(request)
+    account_list = []
+    for email, acc in accounts.items():
+        account_list.append({
+            "email": email,
+            "name": acc.get("name", email),
+            "picture": acc.get("picture", ""),
+            "is_active": (email == active_email),
+        })
+
+    return JSONResponse({
+        "active_account": active_email,
+        "accounts": account_list,
+    })
+
+
+@app.post("/api/accounts/switch")
+async def switch_account_endpoint(request: Request, body: SwitchAccountRequest):
+    """Switches the active Google account for Calendar and Gmail actions."""
+    target_email = body.email.strip()
+    accounts = get_accounts_dict(request)
+
+    if target_email not in accounts:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account '{target_email}' is not connected.",
+        )
+
+    request.session["active_account"] = target_email
+    acc_data = accounts[target_email]
+
+    # Sync top-level session variables
+    request.session["user_email"] = target_email
+    request.session["user_name"] = acc_data.get("name", target_email)
+    request.session["user_picture"] = acc_data.get("picture", "")
+    request.session["user_creds"] = acc_data
+
+    logger.info(f"Switched active account to: {target_email}")
+    return JSONResponse({
+        "success": True,
+        "active_account": target_email,
+        "name": acc_data.get("name", target_email),
+    })
+
+
+@app.post("/api/accounts/remove")
+async def remove_account_endpoint(request: Request, body: SwitchAccountRequest):
+    """Removes a specific connected Google account from session."""
+    target_email = body.email.strip()
+    accounts = get_accounts_dict(request)
+
+    if target_email not in accounts:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+
+    del accounts[target_email]
+    request.session["accounts"] = accounts
+
+    # If no accounts left, clear session and instruct client to redirect
+    if not accounts:
+        request.session.clear()
+        return JSONResponse({"success": True, "redirect": "/login"})
+
+    # If the active account was removed, switch to another remaining account
+    current_active = request.session.get("active_account")
+    if current_active == target_email:
+        new_active = next(iter(accounts.keys()))
+        request.session["active_account"] = new_active
+        acc_data = accounts[new_active]
+        request.session["user_email"] = new_active
+        request.session["user_name"] = acc_data.get("name", new_active)
+        request.session["user_picture"] = acc_data.get("picture", "")
+        request.session["user_creds"] = acc_data
+    else:
+        new_active = current_active
+
+    return JSONResponse({
+        "success": True,
+        "active_account": new_active,
+        "remaining_accounts": len(accounts),
+    })
+
+
+# ---------------------------------------------------------------------------
+# 8. Chat History API Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/api/history")
 async def get_history_endpoint(request: Request):
-    """Returns all chat sessions for the logged-in user."""
-    user_email = request.session.get("user_email")
-    user_creds = request.session.get("user_creds")
-    if not user_creds or not user_email:
+    """Returns all chat sessions for the active user."""
+    active_email = get_active_account_email(request)
+    if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
-    sessions = get_user_chat_sessions(user_email)
+    sessions = get_user_chat_sessions(active_email)
     return JSONResponse({"sessions": sessions})
 
 
 @app.get("/api/history/{session_id}")
 async def get_session_history_endpoint(session_id: str, request: Request):
     """Returns all messages belonging to a specific session."""
-    user_email = request.session.get("user_email")
-    user_creds = request.session.get("user_creds")
-    if not user_creds or not user_email:
+    active_email = get_active_account_email(request)
+    if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
-    data = get_chat_session_details(session_id, user_email)
+    data = get_chat_session_details(session_id, active_email)
     if not data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found.")
 
@@ -665,12 +850,11 @@ async def get_session_history_endpoint(session_id: str, request: Request):
 @app.delete("/api/history/{session_id}")
 async def delete_session_endpoint(session_id: str, request: Request):
     """Deletes a specific chat session."""
-    user_email = request.session.get("user_email")
-    user_creds = request.session.get("user_creds")
-    if not user_creds or not user_email:
+    active_email = get_active_account_email(request)
+    if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
-    success = delete_chat_session(session_id, user_email)
+    success = delete_chat_session(session_id, active_email)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found or already deleted.")
 
@@ -679,18 +863,17 @@ async def delete_session_endpoint(session_id: str, request: Request):
 
 @app.delete("/api/history")
 async def clear_all_history_endpoint(request: Request):
-    """Deletes all chat history for the logged-in user."""
-    user_email = request.session.get("user_email")
-    user_creds = request.session.get("user_creds")
-    if not user_creds or not user_email:
+    """Deletes all chat history for the active user."""
+    active_email = get_active_account_email(request)
+    if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
-    count = delete_all_user_sessions(user_email)
+    count = delete_all_user_sessions(active_email)
     return JSONResponse({"success": True, "message": f"Cleared {count} chat sessions."})
 
 
 # ---------------------------------------------------------------------------
-# 8. AI Agent Runner & LangChain Integration
+# 9. AI Agent Runner & LangChain Integration
 # ---------------------------------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
@@ -701,14 +884,14 @@ class ChatRequest(BaseModel):
 async def chat_endpoint(request: Request, body: ChatRequest):
     """
     AI Chatbot endpoint:
-    - Validates user authentication.
+    - Validates active user authentication.
     - Manages SQLite chat sessions and message persistence.
-    - Dynamically binds user Google Calendar and Gmail tools.
-    - Runs Gemini 3.6 Flash / 3.5 Flash with fallback support.
+    - Dynamically binds user Google Calendar and Gmail tools for ACTIVE account.
+    - Runs Gemini 3.6 Flash with multi-model fallback.
     """
     user_creds = get_user_credentials(request)
-    user_email = request.session.get("user_email")
-    if not user_creds or not user_email:
+    active_email = get_active_account_email(request)
+    if not user_creds or not active_email:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized. Please sign in with your Google Account first.",
@@ -730,16 +913,15 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     session_title = ""
 
     if session_id:
-        existing = get_chat_session_details(session_id, user_email)
+        existing = get_chat_session_details(session_id, active_email)
         if not existing:
-            # Create fresh session if invalid ID supplied
             session_title = (user_message[:35] + "...") if len(user_message) > 35 else user_message
-            session_id = create_chat_session(user_email, session_title)
+            session_id = create_chat_session(active_email, session_title)
         else:
             session_title = existing["session"]["title"]
     else:
         session_title = (user_message[:35] + "...") if len(user_message) > 35 else user_message
-        session_id = create_chat_session(user_email, session_title)
+        session_id = create_chat_session(active_email, session_title)
 
     # Save incoming user message
     save_chat_message(session_id, "user", user_message)
@@ -800,11 +982,11 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         # 3. System Instructions
         system_prompt = (
             "You are 'AI Calendar Agent', an expert, helpful, and friendly scheduling assistant.\n"
-            f"Active User: {user_email}\n"
+            f"Active Account: {active_email}\n"
             f"Current DateTime: {current_time_str} (ISO: {current_iso_str})\n"
             f"Default Timezone: {CALENDAR_TIMEZONE}\n\n"
             "Instructions:\n"
-            "1. You have dynamic access to the user's Google Calendar and Gmail tools.\n"
+            "1. You have dynamic access to the active user's Google Calendar and Gmail tools.\n"
             "2. When the user asks about their schedule, events, or availability, call `list_events`.\n"
             "3. When the user asks to create/schedule an event (e.g., 'meeting with friends tomorrow at 3 PM'):\n"
             "   - Calculate start_time and end_time (defaulting to 1 hour duration if unspecified) relative to Current DateTime.\n"
@@ -926,7 +1108,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
 
 # ---------------------------------------------------------------------------
-# 9. Frontend UI Route (Gated Jinja2 Template Rendering)
+# 10. Frontend UI Route (Gated Jinja2 Template Rendering)
 # ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def serve_index(request: Request):
@@ -934,20 +1116,20 @@ async def serve_index(request: Request):
     Renders the ChatGPT-style modern web interface for authenticated users.
     Redirects unauthenticated visitors to /login.
     """
-    user_email = request.session.get("user_email")
-    user_creds = request.session.get("user_creds")
-    if not user_creds or not user_email:
+    active_email = get_active_account_email(request)
+    if not active_email:
         return RedirectResponse(url="/login", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
-    user_name = request.session.get("user_name", "User")
-    user_picture = request.session.get("user_picture", "")
+    accounts = get_accounts_dict(request)
+    active_data = accounts.get(active_email, {})
 
     context = {
         "request": request,
-        "user_email": user_email,
-        "user_name": user_name,
-        "user_picture": user_picture,
+        "user_email": active_email,
+        "user_name": active_data.get("name", active_email),
+        "user_picture": active_data.get("picture", ""),
         "authenticated": True,
+        "accounts_count": len(accounts),
     }
 
     try:
@@ -957,7 +1139,7 @@ async def serve_index(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# 10. Server Runner
+# 11. Server Runner
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
