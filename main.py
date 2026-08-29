@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -26,7 +27,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 
 # ---------------------------------------------------------------------------
-# 1. Environment & Setup
+# 1. Environment & Path Setup
 # ---------------------------------------------------------------------------
 load_dotenv()
 
@@ -40,22 +41,19 @@ logger = logging.getLogger("ai_calendar_agent")
 # Enable OAuth insecure transport during local development (HTTP)
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = os.getenv("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
-# Base directory & Templates
+# Base directory & Templates configuration
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 
-try:
-    from fastapi.templating import Jinja2Templates
-    templates = Jinja2Templates(directory=str(TEMPLATES_DIR)) if TEMPLATES_DIR.exists() else None
-except Exception:
-    templates = None
+# Jinja2 Templates setup (points reliably to templates directory)
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR) if TEMPLATES_DIR.exists() else "templates")
 
-# Environment Configuration
+# Environment Variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-SECRET_KEY = os.getenv("SECRET_KEY", "ai-calendar-agent-secret-key-super-secure-change-in-prod-12345")
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
+SECRET_KEY = os.getenv("SECRET_KEY", "ai-calendar-agent-secret-key-production-ready-2026")
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
 CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "UTC")
 
 # Google OAuth 2.0 Scopes required for Calendar & Gmail
@@ -76,7 +74,7 @@ app = FastAPI(
     version="2.0.0",
 )
 
-# CORS Middleware (Enable for all origins)
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -92,7 +90,7 @@ app.add_middleware(
     session_cookie="ai_calendar_session",
     max_age=14 * 24 * 3600,  # 14 days
     same_site="lax",
-    https_only=False,  # Set to True in strict HTTPS production if behind SSL
+    https_only=False,
 )
 
 
@@ -100,11 +98,10 @@ app.add_middleware(
 # 3. Google OAuth 2.0 Helper Functions
 # ---------------------------------------------------------------------------
 def get_client_config() -> Dict[str, Any]:
-    """Retrieve Google OAuth Client configuration from env vars or credentials.json."""
+    """Retrieve Google OAuth Client configuration from env vars or credentials.json fallback."""
     client_id = GOOGLE_CLIENT_ID
     client_secret = GOOGLE_CLIENT_SECRET
 
-    # Check if credentials.json exists as fallback
     cred_file = BASE_DIR / "credentials.json"
     if (not client_id or not client_secret) and cred_file.exists():
         try:
@@ -114,11 +111,11 @@ def get_client_config() -> Dict[str, Any]:
                 if conf:
                     return {"web": conf}
         except Exception as e:
-            logger.warning(f"Failed to read credentials.json: {e}")
+            logger.warning(f"Failed reading credentials.json: {e}")
 
     if not client_id or not client_secret:
         raise RuntimeError(
-            "Google OAuth credentials missing! Please configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env or provide credentials.json"
+            "Google OAuth credentials missing! Configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env or credentials.json"
         )
 
     return {
@@ -143,7 +140,7 @@ def get_redirect_uri(request: Request) -> str:
 def get_user_credentials(request: Request) -> Optional[Credentials]:
     """
     Dynamically deserialize and refresh the active user's Google OAuth Credentials
-    from Starlette session.
+    from the current session.
     """
     creds_data = request.session.get("user_creds")
     if not creds_data:
@@ -159,11 +156,10 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
             scopes=creds_data.get("scopes", SCOPES),
         )
 
-        # Automatically refresh expired access tokens
+        # Refresh token automatically if expired
         if creds.expired and creds.refresh_token:
-            logger.info("Access token expired. Refreshing token with Google OAuth...")
+            logger.info("Access token expired. Refreshing token via Google OAuth...")
             creds.refresh(GoogleRequest())
-            # Update refreshed token in active session
             request.session["user_creds"] = {
                 "token": creds.token,
                 "refresh_token": creds.refresh_token,
@@ -175,18 +171,15 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
 
         return creds
     except Exception as e:
-        logger.error(f"Failed to load or refresh user credentials: {e}")
+        logger.error(f"Error loading user credentials: {e}")
         return None
 
 
 # ---------------------------------------------------------------------------
-# 4. Dynamic Multi-User Google Tool Functions
+# 4. Multi-User Google Tool Functions
 # ---------------------------------------------------------------------------
 def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_results: int = 15) -> str:
-    """
-    Lists upcoming events from the user's primary Google Calendar.
-    time_min: Start ISO string (defaults to current UTC time).
-    """
+    """Lists upcoming events from the user's primary Google Calendar."""
     try:
         service = build("calendar", "v3", credentials=creds)
         if not time_min:
@@ -245,14 +238,11 @@ def create_event_tool(
     location: str = "",
     attendees: Optional[List[str]] = None,
 ) -> str:
-    """
-    Creates a new event on the user's primary Google Calendar after performing conflict checking.
-    start_time and end_time must be ISO 8601 strings (e.g. '2026-08-30T10:00:00Z' or '2026-08-30T10:00:00+05:30').
-    """
+    """Creates a new event on user's primary Google Calendar after conflict checking."""
     try:
         service = build("calendar", "v3", credentials=creds)
 
-        # 1. Conflict checking: check for any overlapping events in this window
+        # Conflict checking in the target time window
         conflict_msg = ""
         try:
             overlap_check = (
@@ -268,14 +258,13 @@ def create_event_tool(
             conflicts = overlap_check.get("items", [])
             if conflicts:
                 conflict_names = [f"'{c.get('summary', 'Untitled')}'" for c in conflicts]
-                conflict_msg = f"⚠️ Notice: You have overlapping event(s) during this time: {', '.join(conflict_names)}."
+                conflict_msg = f"⚠️ Conflict Notice: You already have event(s) scheduled at this time: {', '.join(conflict_names)}."
         except Exception as check_err:
             logger.warning(f"Conflict check warning: {check_err}")
 
-        # 2. Prepare event payload
         event_body: Dict[str, Any] = {
             "summary": summary,
-            "description": description or f"Scheduled via AI Calendar Agent",
+            "description": description or "Scheduled via AI Calendar Agent",
             "start": {"dateTime": start_time},
             "end": {"dateTime": end_time},
         }
@@ -309,10 +298,7 @@ def create_event_tool(
 
 
 def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
-    """
-    Searches unread emails for meeting, tea, coffee, or meetup invitations
-    using the query 'is:unread (tea OR coffee OR meetup OR meeting OR sync OR invite)'.
-    """
+    """Searches unread emails for meeting, tea, coffee, or sync invitations."""
     try:
         service = build("gmail", "v1", credentials=creds)
         query = "is:unread (tea OR coffee OR meetup OR meeting OR sync OR invite)"
@@ -326,8 +312,10 @@ def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
         invitations = []
         for msg in messages:
             msg_id = msg["id"]
-            msg_data = service.users().messages().get(userId="me", id=msg_id, format="metadata",
-                                                     metadataHeaders=["Subject", "From", "Date"]).execute()
+            msg_data = service.users().messages().get(
+                userId="me", id=msg_id, format="metadata",
+                metadataHeaders=["Subject", "From", "Date"]
+            ).execute()
 
             headers = {h["name"]: h["value"] for h in msg_data.get("payload", {}).get("headers", [])}
             subject = headers.get("Subject", "(No Subject)")
@@ -358,7 +346,7 @@ def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
 # ---------------------------------------------------------------------------
 @app.get("/login", response_class=RedirectResponse)
 async def login(request: Request):
-    """Initiates Google OAuth 2.0 authorization flow."""
+    """Initiates Google OAuth 2.0 consent flow."""
     try:
         client_config = get_client_config()
         redirect_uri = get_redirect_uri(request)
@@ -372,7 +360,7 @@ async def login(request: Request):
         authorization_url, state = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
-            prompt="consent",  # Ensures refresh_token is always returned
+            prompt="consent",
         )
 
         request.session["oauth_state"] = state
@@ -388,7 +376,7 @@ async def login(request: Request):
 
 @app.get("/auth/callback", name="auth_callback")
 async def auth_callback(request: Request):
-    """Handles OAuth 2.0 callback, exchanges code for credentials, and stores in session."""
+    """Handles OAuth callback, exchanges code for credentials, and stores in session."""
     state = request.session.get("oauth_state")
     code = request.query_params.get("code")
 
@@ -418,7 +406,7 @@ async def auth_callback(request: Request):
         name = user_info.get("name", email)
         picture = user_info.get("picture", "")
 
-        # Store credentials and user profile securely in session
+        # Store credentials and user profile in session
         request.session["user_email"] = email
         request.session["user_name"] = name
         request.session["user_picture"] = picture
@@ -505,7 +493,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         current_time_str = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
         current_iso_str = now_dt.isoformat()
 
-        # 1. Dynamically define tools with active user credentials injected
+        # 1. Dynamically wrap tools with active user credentials
         def list_events_wrapper(time_min: Optional[str] = None, max_results: int = 10) -> str:
             """Query upcoming Google Calendar events."""
             return list_events_tool(user_creds, time_min=time_min, max_results=max_results)
@@ -518,7 +506,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             location: str = "",
             attendees: Optional[List[str]] = None,
         ) -> str:
-            """Create a new Google Calendar event with conflict check."""
+            """Create a new Google Calendar event with conflict checking."""
             return create_event_tool(
                 user_creds,
                 summary=summary,
@@ -568,7 +556,6 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         )
 
         # 3. Initialize Gemini LLM with bound tools
-        # We use gemini-2.5-flash as default, with fallback candidates if needed
         model_candidates = [
             os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             "gemini-2.0-flash",
@@ -644,22 +631,28 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
 
 # ---------------------------------------------------------------------------
-# 7. Frontend UI Route
+# 7. Frontend UI Route (Jinja2 Template Rendering)
 # ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-async def serve_ui(request: Request):
-    """Serves the ChatGPT-style modern web interface."""
-    template_file = TEMPLATES_DIR / "index.html"
-    if template_file.exists():
-        with open(template_file, "r", encoding="utf-8") as f:
-            html_content = f.read()
-        return HTMLResponse(content=html_content)
-    elif templates:
-        return templates.TemplateResponse("index.html", {"request": request})
-    else:
-        return HTMLResponse(
-            content="<h1>AI Calendar Agent</h1><p>Frontend template not found. Please ensure templates/index.html exists.</p>"
-        )
+async def serve_index(request: Request):
+    """Renders the ChatGPT-style modern web interface using Jinja2Templates."""
+    user_email = request.session.get("user_email", "")
+    user_name = request.session.get("user_name", "")
+    user_picture = request.session.get("user_picture", "")
+    authenticated = bool(request.session.get("user_creds"))
+
+    context = {
+        "request": request,
+        "user_email": user_email,
+        "user_name": user_name,
+        "user_picture": user_picture,
+        "authenticated": authenticated,
+    }
+
+    try:
+        return templates.TemplateResponse(request=request, name="index.html", context=context)
+    except Exception:
+        return templates.TemplateResponse("index.html", context)
 
 
 # ---------------------------------------------------------------------------
