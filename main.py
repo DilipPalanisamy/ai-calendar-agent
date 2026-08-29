@@ -1746,22 +1746,37 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "5. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
         )
 
-        # 4. Initialize Gemini LLM with active Google AI models
-        configured_model = (os.getenv("GEMINI_MODEL") or "gemini-3.6-flash").strip()
+        # 4. Initialize Gemini LLM with active Google AI models (excluding non-existent/deprecated ones)
+        configured_model = (os.getenv("GEMINI_MODEL") or "gemini-3.5-flash").strip()
         raw_candidates = [
             configured_model,
-            "gemini-3.6-flash",
             "gemini-3.5-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-pro-preview",
-            "gemini-3.6-pro",
         ]
-        legacy_deprecated = {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest", "gemini-pro", "models/gemini-pro"}
+        legacy_deprecated = {
+            "gemini-3.6-pro",
+            "models/gemini-3.6-pro",
+            "gemini-2.5-flash",
+            "models/gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "models/gemini-2.5-pro",
+            "gemini-2.5-flash-lite",
+            "models/gemini-2.5-flash-lite",
+            "gemini-1.5-flash-latest",
+            "models/gemini-1.5-flash-latest",
+            "gemini-pro",
+            "models/gemini-pro",
+        }
         unique_candidates = []
         for cand in raw_candidates:
             cand_clean = cand.removeprefix("models/").strip()
             if cand_clean and cand_clean not in legacy_deprecated and cand_clean not in unique_candidates:
                 unique_candidates.append(cand_clean)
+
+        if not unique_candidates:
+            unique_candidates = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"]
 
         # 5. Multi-turn Agent Execution Loop with Model Fallback
         max_iterations = 4

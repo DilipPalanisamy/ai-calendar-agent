@@ -16,15 +16,30 @@ load_dotenv()
 
 
 def get_gemini_model_candidates(preferred_model: str | None = None):
-    """Return a safe list of Gemini model names, avoiding legacy unsupported ones."""
-    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-3.6-flash").strip()
+    """Return a safe list of Gemini model names, avoiding legacy unsupported or non-existent ones."""
+    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-3.5-flash").strip()
     normalized = configured_model.removeprefix("models/") if configured_model.startswith("models/") else configured_model
 
+    deprecated_models = {
+        "gemini-3.6-pro",
+        "models/gemini-3.6-pro",
+        "gemini-2.5-flash",
+        "models/gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "models/gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
+        "models/gemini-2.5-flash-lite",
+        "gemini-1.5-flash-latest",
+        "models/gemini-1.5-flash-latest",
+        "gemini-pro",
+        "models/gemini-pro",
+    }
+
     candidates = []
-    if normalized and normalized not in {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest", "gemini-pro"}:
+    if normalized and normalized not in deprecated_models:
         candidates.append(normalized)
 
-    for fallback_model in ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"]:
+    for fallback_model in ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"]:
         if fallback_model not in candidates:
             candidates.append(fallback_model)
 
