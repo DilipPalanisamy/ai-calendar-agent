@@ -1,5 +1,7 @@
 import os
 import json
+import uuid
+import sqlite3
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +46,7 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = os.getenv("OAUTHLIB_INSECURE_TRANSPO
 # Base directory & Templates configuration
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
+DB_PATH = BASE_DIR / "chat_history.db"
 
 # Jinja2 Templates setup
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR) if TEMPLATES_DIR.exists() else "templates")
@@ -66,12 +69,143 @@ SCOPES = [
 ]
 
 # ---------------------------------------------------------------------------
-# 2. FastAPI Application Initialization
+# 2. SQLite Database Setup & Chat History Management
+# ---------------------------------------------------------------------------
+def get_db_connection() -> sqlite3.Connection:
+    """Creates a connection to the SQLite database with row access."""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    return conn
+
+
+def init_db():
+    """Initializes SQLite database schema for chat sessions and messages."""
+    with get_db_connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id TEXT PRIMARY KEY,
+                user_email TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON chat_sessions(user_email, updated_at DESC);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                sender TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, timestamp ASC);")
+        conn.commit()
+    logger.info("SQLite Chat History database initialized successfully.")
+
+
+# Initialize database at startup
+init_db()
+
+
+def create_chat_session(user_email: str, title: str) -> str:
+    """Creates a new chat session and returns its unique UUID."""
+    session_id = str(uuid.uuid4())
+    now_str = datetime.now(timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT INTO chat_sessions (id, user_email, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (session_id, user_email, title, now_str, now_str)
+        )
+        conn.commit()
+    return session_id
+
+
+def get_user_chat_sessions(user_email: str) -> List[Dict[str, Any]]:
+    """Retrieves all chat sessions for a specific user ordered by recency."""
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "SELECT id, title, created_at, updated_at FROM chat_sessions WHERE user_email = ? ORDER BY updated_at DESC",
+            (user_email,)
+        )
+        rows = cursor.fetchall()
+        return [{"id": r["id"], "title": r["title"], "created_at": r["created_at"], "updated_at": r["updated_at"]} for r in rows]
+
+
+def get_chat_session_details(session_id: str, user_email: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a session and all its messages, verifying user ownership."""
+    with get_db_connection() as conn:
+        s_cur = conn.execute(
+            "SELECT id, title, created_at, updated_at FROM chat_sessions WHERE id = ? AND user_email = ?",
+            (session_id, user_email)
+        )
+        session_row = s_cur.fetchone()
+        if not session_row:
+            return None
+
+        m_cur = conn.execute(
+            "SELECT id, sender, content, timestamp FROM chat_messages WHERE session_id = ? ORDER BY timestamp ASC, id ASC",
+            (session_id,)
+        )
+        msg_rows = m_cur.fetchall()
+        messages = [{"id": m["id"], "sender": m["sender"], "content": m["content"], "timestamp": m["timestamp"]} for m in msg_rows]
+
+        return {
+            "session": {
+                "id": session_row["id"],
+                "title": session_row["title"],
+                "created_at": session_row["created_at"],
+                "updated_at": session_row["updated_at"]
+            },
+            "messages": messages
+        }
+
+
+def save_chat_message(session_id: str, sender: str, content: str):
+    """Appends a message to a session and updates the session timestamp."""
+    now_str = datetime.now(timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT INTO chat_messages (session_id, sender, content, timestamp) VALUES (?, ?, ?, ?)",
+            (session_id, sender, content, now_str)
+        )
+        conn.execute(
+            "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
+            (now_str, session_id)
+        )
+        conn.commit()
+
+
+def delete_chat_session(session_id: str, user_email: str) -> bool:
+    """Deletes a specific chat session and all associated messages."""
+    with get_db_connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM chat_sessions WHERE id = ? AND user_email = ?",
+            (session_id, user_email)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_all_user_sessions(user_email: str) -> int:
+    """Clears all chat sessions and history for a given user."""
+    with get_db_connection() as conn:
+        cur = conn.execute("DELETE FROM chat_sessions WHERE user_email = ?", (user_email,))
+        conn.commit()
+        return cur.rowcount
+
+
+# ---------------------------------------------------------------------------
+# 3. FastAPI Application Initialization
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="AI Calendar Agent",
     description="Multi-user AI Calendar & Gmail Assistant powered by Gemini & FastAPI",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 # Check if running in production / Render HTTPS
@@ -102,7 +236,7 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# 3. Google OAuth 2.0 Helper Functions
+# 4. Google OAuth 2.0 Helper Functions
 # ---------------------------------------------------------------------------
 def get_client_config() -> Dict[str, Any]:
     """Retrieve Google OAuth Client configuration from env vars or credentials.json fallback."""
@@ -190,7 +324,7 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
 
 
 # ---------------------------------------------------------------------------
-# 4. Multi-User Google Tool Functions
+# 5. Multi-User Google Tool Functions
 # ---------------------------------------------------------------------------
 def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_results: int = 15) -> str:
     """Lists upcoming events from the user's primary Google Calendar."""
@@ -360,7 +494,7 @@ def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 5. Google OAuth 2.0 & Authentication Endpoints
+# 6. Google OAuth 2.0 & Authentication Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -499,10 +633,68 @@ async def get_current_user(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# 6. AI Agent Runner & LangChain Integration
+# 7. Chat History API Endpoints
+# ---------------------------------------------------------------------------
+@app.get("/api/history")
+async def get_history_endpoint(request: Request):
+    """Returns all chat sessions for the logged-in user."""
+    user_email = request.session.get("user_email")
+    user_creds = request.session.get("user_creds")
+    if not user_creds or not user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
+
+    sessions = get_user_chat_sessions(user_email)
+    return JSONResponse({"sessions": sessions})
+
+
+@app.get("/api/history/{session_id}")
+async def get_session_history_endpoint(session_id: str, request: Request):
+    """Returns all messages belonging to a specific session."""
+    user_email = request.session.get("user_email")
+    user_creds = request.session.get("user_creds")
+    if not user_creds or not user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
+
+    data = get_chat_session_details(session_id, user_email)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found.")
+
+    return JSONResponse(data)
+
+
+@app.delete("/api/history/{session_id}")
+async def delete_session_endpoint(session_id: str, request: Request):
+    """Deletes a specific chat session."""
+    user_email = request.session.get("user_email")
+    user_creds = request.session.get("user_creds")
+    if not user_creds or not user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
+
+    success = delete_chat_session(session_id, user_email)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found or already deleted.")
+
+    return JSONResponse({"success": True, "message": "Session deleted."})
+
+
+@app.delete("/api/history")
+async def clear_all_history_endpoint(request: Request):
+    """Deletes all chat history for the logged-in user."""
+    user_email = request.session.get("user_email")
+    user_creds = request.session.get("user_creds")
+    if not user_creds or not user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
+
+    count = delete_all_user_sessions(user_email)
+    return JSONResponse({"success": True, "message": f"Cleared {count} chat sessions."})
+
+
+# ---------------------------------------------------------------------------
+# 8. AI Agent Runner & LangChain Integration
 # ---------------------------------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
+    session_id: Optional[str] = None
 
 
 @app.post("/api/chat")
@@ -510,11 +702,13 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     """
     AI Chatbot endpoint:
     - Validates user authentication.
+    - Manages SQLite chat sessions and message persistence.
     - Dynamically binds user Google Calendar and Gmail tools.
-    - Runs Gemini 1.5 Flash with fallback support.
+    - Runs Gemini 3.6 Flash / 3.5 Flash with fallback support.
     """
     user_creds = get_user_credentials(request)
-    if not user_creds:
+    user_email = request.session.get("user_email")
+    if not user_creds or not user_email:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized. Please sign in with your Google Account first.",
@@ -531,13 +725,31 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     if not user_message:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message cannot be empty.")
 
+    # 1. Manage Active Chat Session in SQLite
+    session_id = body.session_id
+    session_title = ""
+
+    if session_id:
+        existing = get_chat_session_details(session_id, user_email)
+        if not existing:
+            # Create fresh session if invalid ID supplied
+            session_title = (user_message[:35] + "...") if len(user_message) > 35 else user_message
+            session_id = create_chat_session(user_email, session_title)
+        else:
+            session_title = existing["session"]["title"]
+    else:
+        session_title = (user_message[:35] + "...") if len(user_message) > 35 else user_message
+        session_id = create_chat_session(user_email, session_title)
+
+    # Save incoming user message
+    save_chat_message(session_id, "user", user_message)
+
     try:
-        user_email = request.session.get("user_email", "User")
         now_dt = datetime.now(timezone.utc).astimezone()
         current_time_str = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
         current_iso_str = now_dt.isoformat()
 
-        # 1. Dynamically wrap tools with active user credentials
+        # 2. Dynamically wrap tools with active user credentials
         def list_events_wrapper(time_min: Optional[str] = None, max_results: int = 10) -> str:
             """Query upcoming Google Calendar events."""
             return list_events_tool(user_creds, time_min=time_min, max_results=max_results)
@@ -585,7 +797,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 2. System Instructions
+        # 3. System Instructions
         system_prompt = (
             "You are 'AI Calendar Agent', an expert, helpful, and friendly scheduling assistant.\n"
             f"Active User: {user_email}\n"
@@ -603,7 +815,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "5. Format output using clean Markdown, bullet points, and nice styling. Include clickable links if available."
         )
 
-        # 3. Initialize Gemini LLM with bound tools (Google active models)
+        # 4. Initialize Gemini LLM with active Google AI models
         configured_model = (os.getenv("GEMINI_MODEL") or "gemini-3.6-flash").strip()
         raw_candidates = [
             configured_model,
@@ -620,7 +832,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             if cand_clean and cand_clean not in legacy_deprecated and cand_clean not in unique_candidates:
                 unique_candidates.append(cand_clean)
 
-        # 4. Multi-turn Agent Execution Loop with Model Fallback
+        # 5. Multi-turn Agent Execution Loop with Model Fallback
         max_iterations = 6
         final_text = ""
         last_error = None
@@ -696,7 +908,14 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 raise last_error
             final_text = "I processed your request. Let me know if you need anything else with your schedule or emails!"
 
-        return JSONResponse({"response": str(final_text)})
+        # Save outgoing bot response to SQLite
+        save_chat_message(session_id, "assistant", str(final_text))
+
+        return JSONResponse({
+            "response": str(final_text),
+            "session_id": session_id,
+            "title": session_title,
+        })
 
     except Exception as e:
         logger.error(f"Chat execution failed: {e}", exc_info=True)
@@ -707,7 +926,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
 
 # ---------------------------------------------------------------------------
-# 7. Frontend UI Route (Gated Jinja2 Template Rendering)
+# 9. Frontend UI Route (Gated Jinja2 Template Rendering)
 # ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def serve_index(request: Request):
@@ -738,7 +957,7 @@ async def serve_index(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# 8. Server Runner
+# 10. Server Runner
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
