@@ -1105,47 +1105,41 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             StructuredTool.from_function(
                 coroutine=list_events_wrapper,
                 name="list_events",
-                description="List upcoming events from the user's primary Google Calendar. time_min is optional ISO string.",
+                description="List upcoming Google Calendar events. Optional time_min ISO string.",
             ),
             StructuredTool.from_function(
                 coroutine=create_event_wrapper,
                 name="create_event",
-                description="Create a new event on Google Calendar with conflict checking. start_time and end_time must be ISO 8601 strings (e.g. 'YYYY-MM-DDTHH:MM:SS').",
+                description="Create Google Calendar event. start_time and end_time must be ISO 8601 strings.",
             ),
             StructuredTool.from_function(
                 coroutine=delete_calendar_event_wrapper,
                 name="delete_calendar_event",
-                description="Delete an existing event from Google Calendar using event_id, or search by summary/title and approximate time.",
+                description="Delete Google Calendar event by event_id or title.",
             ),
             StructuredTool.from_function(
                 coroutine=check_gmail_invites_wrapper,
                 name="check_gmail_invites",
-                description="Scan unread emails for tea, coffee, meetup, or meeting invitations in Gmail.",
+                description="Scan unread Gmail for meeting, coffee, or sync invitations.",
             ),
         ]
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. System Instructions
+        # 3. Speed-Focused Concise System Instructions
         system_prompt = (
-            "You are 'AI Calendar Agent', an expert, helpful, and friendly scheduling assistant.\n"
+            "System Directive: You are a high-speed calendar AI assistant. Be extremely concise, direct, and brief. "
+            "Perform tool calls immediately without conversational filler or lengthy intros/outros. "
+            "Provide short confirmations with direct links and action buttons.\n\n"
             f"Active Account: {active_email}\n"
             f"Current DateTime: {current_time_str} (ISO: {current_iso_str})\n"
             f"Default Timezone: {CALENDAR_TIMEZONE}\n\n"
             "Instructions:\n"
-            "1. You have dynamic access to the active user's Google Calendar and Gmail tools.\n"
-            "2. When the user asks about their schedule, events, or availability, call `list_events`.\n"
-            "3. When the user asks to create/schedule an event (e.g., 'meeting with friends tomorrow at 3 PM'):\n"
-            "   - Calculate start_time and end_time (defaulting to 1 hour duration if unspecified) relative to Current DateTime.\n"
-            "   - Format start_time and end_time as ISO 8601 strings (e.g. 'YYYY-MM-DDTHH:MM:SS').\n"
-            "   - Call `create_event` with summary, start_time, end_time, description, location, and attendees.\n"
-            "   - Inform the user of successful creation with title, start/end time, location, clickable Google Calendar link, and include the event ID.\n"
-            "4. When the user asks to delete, cancel, or remove an event (e.g., 'Delete my 3 PM meeting tomorrow' or 'Cancel event Team Sync'):\n"
-            "   - Call `delete_calendar_event` with the event_id if known, or summary/title and approximate time.\n"
-            "   - Confirm the deletion clearly with the event title.\n"
-            "5. When listing or creating events, include a clean delete button format next to each event: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete Event</button>` so the user can delete it with a single click.\n"
-            "6. When the user asks about emails, tea, coffee, or meeting invitations, call `check_gmail_invites` and summarize relevant findings with clear options to schedule them.\n"
-            "7. Format output using clean Markdown, bullet points, and nice styling. Include clickable links if available."
+            "1. When user asks about schedule or availability, call `list_events`.\n"
+            "2. When user asks to create an event, calculate ISO start_time/end_time and call `create_event`. Give a 1-sentence confirmation with clickable link and delete button.\n"
+            "3. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
+            "4. When creating or listing events, include the delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "5. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
         )
 
         # 4. Initialize Gemini LLM with active Google AI models
@@ -1166,7 +1160,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 unique_candidates.append(cand_clean)
 
         # 5. Multi-turn Agent Execution Loop with Model Fallback
-        max_iterations = 6
+        max_iterations = 4
         final_text = ""
         last_error = None
 
@@ -1176,6 +1170,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     model=model_name,
                     google_api_key=clean_api_key,
                     temperature=0.2,
+                    max_output_tokens=350,
                 )
                 llm_with_tools = llm.bind_tools(tools)
 
