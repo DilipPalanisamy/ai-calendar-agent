@@ -480,6 +480,103 @@ async def list_events_tool(creds: Credentials, time_min: Optional[str] = None, m
         return f"Failed to fetch calendar events: {str(e)}"
 
 
+# ---------------------------------------------------------------------------
+# Google Calendar Color Mapping & Multi-Calendar Tools
+# ---------------------------------------------------------------------------
+GOOGLE_CALENDAR_COLORS: Dict[str, str] = {
+    "lavender": "1",    # Light Purple / Personal
+    "sage": "2",        # Light Green / Health & Wellness
+    "grape": "3",       # Dark Purple
+    "flamingo": "4",    # Light Pink
+    "banana": "5",      # Yellow / Travel & Buffers
+    "tangerine": "6",   # Orange / Tasks
+    "peacock": "7",     # Cyan / Work Syncs
+    "graphite": "8",    # Gray / Rest & Breaks
+    "blueberry": "9",   # Blue / Standard Meetings
+    "basil": "10",      # Green / Fitness & Habits
+    "tomato": "11",     # Red / Urgent & Deadlines
+}
+
+COLOR_KEYWORD_MAP: Dict[str, str] = {
+    "purple": "1",
+    "lavender": "1",
+    "personal": "1",
+    "health": "2",
+    "doctor": "2",
+    "wellness": "2",
+    "sage": "2",
+    "dark purple": "3",
+    "grape": "3",
+    "pink": "4",
+    "flamingo": "4",
+    "yellow": "5",
+    "travel": "5",
+    "banana": "5",
+    "orange": "6",
+    "task": "6",
+    "tangerine": "6",
+    "cyan": "7",
+    "work": "7",
+    "sync": "7",
+    "peacock": "7",
+    "gray": "8",
+    "grey": "8",
+    "rest": "8",
+    "break": "8",
+    "graphite": "8",
+    "blue": "9",
+    "meeting": "9",
+    "blueberry": "9",
+    "green": "10",
+    "fitness": "10",
+    "workout": "10",
+    "gym": "10",
+    "sport": "10",
+    "basil": "10",
+    "red": "11",
+    "urgent": "11",
+    "critical": "11",
+    "deadline": "11",
+    "high priority": "11",
+    "tomato": "11",
+}
+
+
+def map_to_google_color_id(color_or_keyword: Optional[str]) -> Optional[str]:
+    """Translates natural language colors and category keywords into standard Google Calendar colorId values."""
+    if not color_or_keyword:
+        return None
+    raw = str(color_or_keyword).strip().lower()
+    if raw in COLOR_KEYWORD_MAP:
+        return COLOR_KEYWORD_MAP[raw]
+    for k, v in COLOR_KEYWORD_MAP.items():
+        if k in raw:
+            return v
+    return None
+
+
+async def list_user_calendars_tool(creds: Credentials) -> str:
+    """
+    Lists all Google Calendars accessible by the user (Primary, Work, Personal, etc.).
+    """
+    try:
+        service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
+        cal_list = await asyncio.to_thread(service.calendarList().list().execute)
+        calendars = []
+        for item in cal_list.get("items", []):
+            calendars.append({
+                "id": item.get("id"),
+                "summary": item.get("summary"),
+                "description": item.get("description", ""),
+                "primary": item.get("primary", False),
+                "backgroundColor": item.get("backgroundColor"),
+            })
+        return json.dumps({"status": "success", "calendars": calendars}, indent=2)
+    except Exception as e:
+        logger.error(f"Error fetching user calendars: {e}")
+        return f"Failed to list calendars: {str(e)}"
+
+
 async def create_event_tool(
     creds: Credentials,
     summary: str,
@@ -491,10 +588,12 @@ async def create_event_tool(
     add_google_meet: bool = False,
     travel_buffer_minutes: Optional[int] = None,
     recurrence_rule: Optional[str] = None,
+    color: Optional[str] = None,
+    calendar_id: str = "primary",
     ignore_conflicts: bool = False,
 ) -> str:
     """
-    Creates a new event on user's primary Google Calendar with smart conflict detection, automated travel time buffers, Google Meet video link generation, guest invitations, and RFC 5545 recurrence rules in IST.
+    Creates a new event on user's Google Calendar with smart conflict detection, automated travel time buffers, Google Meet video link generation, guest invitations, color coding, and RFC 5545 recurrence rules in IST.
     """
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
@@ -520,6 +619,7 @@ async def create_event_tool(
         duration = req_end - req_start
 
         # 1. Smart Conflict Detection & Alternative Slot Search (unless ignore_conflicts is requested or recurring)
+        target_cal_id = calendar_id or "primary"
         if not ignore_conflicts and not recurrence_rule:
             search_window_start = req_start.replace(hour=0, minute=0, second=0, microsecond=0)
             search_window_end = (req_start + timedelta(days=2)).replace(hour=23, minute=59, second=59, microsecond=0)
@@ -527,7 +627,7 @@ async def create_event_tool(
             events_result = await asyncio.to_thread(
                 service.events()
                 .list(
-                    calendarId="primary",
+                    calendarId=target_cal_id,
                     timeMin=search_window_start.isoformat(),
                     timeMax=search_window_end.isoformat(),
                     singleEvents=True,
@@ -639,7 +739,7 @@ async def create_event_tool(
             }
             try:
                 created_buf = await asyncio.to_thread(
-                    service.events().insert(calendarId="primary", body=buffer_body).execute
+                    service.events().insert(calendarId=target_cal_id, body=buffer_body).execute
                 )
                 buffer_info = {
                     "minutes": buffer_minutes,
@@ -651,7 +751,7 @@ async def create_event_tool(
             except Exception as buf_err:
                 logger.warning(f"Failed to create travel buffer event: {buf_err}")
 
-        # 3. Insert Main Event (with optional RRULE recurrence)
+        # 3. Insert Main Event (with optional RRULE recurrence & color)
         event_body: Dict[str, Any] = {
             "summary": summary,
             "description": description or "Scheduled via AI Calendar Agent",
@@ -677,6 +777,10 @@ async def create_event_tool(
                 rrule_clean = f"RRULE:{rrule_clean}"
             event_body["recurrence"] = [rrule_clean]
 
+        color_id = map_to_google_color_id(color)
+        if color_id:
+            event_body["colorId"] = color_id
+
         if add_google_meet:
             req_id = f"meet-{uuid.uuid4().hex[:8]}-{int(datetime.now().timestamp())}"
             event_body["conferenceData"] = {
@@ -687,7 +791,7 @@ async def create_event_tool(
             }
 
         insert_kwargs: Dict[str, Any] = {
-            "calendarId": "primary",
+            "calendarId": target_cal_id,
             "body": event_body,
         }
         if add_google_meet:
@@ -717,6 +821,9 @@ async def create_event_tool(
             "google_meet_link": meet_link,
             "attendees": attendees if attendees else [],
             "location": location,
+            "color": color,
+            "color_id": color_id,
+            "calendar_id": target_cal_id,
             "travel_buffer": buffer_info,
             "start": norm_start,
             "end": norm_end,
@@ -834,11 +941,12 @@ async def update_calendar_event_tool(
     new_start_datetime: Optional[str] = None,
     new_end_datetime: Optional[str] = None,
     new_duration_minutes: Optional[int] = None,
+    new_color: Optional[str] = None,
     new_description: Optional[str] = None,
     new_location: Optional[str] = None,
 ) -> str:
     """
-    Updates, reschedules, moves, extends, or renames an existing Google Calendar event using patch() in IST.
+    Updates, reschedules, moves, extends, colors, or renames an existing Google Calendar event using patch() in IST.
     """
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
@@ -891,6 +999,11 @@ async def update_calendar_event_tool(
 
         if new_title:
             patch_body["summary"] = new_title
+
+        if new_color:
+            c_id = map_to_google_color_id(new_color)
+            if c_id:
+                patch_body["colorId"] = c_id
 
         if new_description is not None:
             patch_body["description"] = new_description
@@ -1479,9 +1592,11 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             add_google_meet: bool = False,
             travel_buffer_minutes: Optional[int] = None,
             recurrence_rule: Optional[str] = None,
+            color: Optional[str] = None,
+            calendar_id: str = "primary",
             ignore_conflicts: bool = False,
         ) -> str:
-            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection, automated travel time buffers, Google Meet video link generation, attendee invitations, and recurring schedule rules."""
+            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection, automated travel time buffers, Google Meet video link generation, attendee invitations, color coding, and recurring schedule rules."""
             return await create_event_tool(
                 user_creds,
                 summary=summary,
@@ -1493,31 +1608,41 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 add_google_meet=add_google_meet,
                 travel_buffer_minutes=travel_buffer_minutes,
                 recurrence_rule=recurrence_rule,
+                color=color,
+                calendar_id=calendar_id,
                 ignore_conflicts=ignore_conflicts,
             )
 
         async def update_calendar_event_wrapper(
             event_id: Optional[str] = None,
             summary_search: Optional[str] = None,
+            calendar_id: str = "primary",
             new_title: Optional[str] = None,
             new_start_datetime: Optional[str] = None,
             new_end_datetime: Optional[str] = None,
             new_duration_minutes: Optional[int] = None,
+            new_color: Optional[str] = None,
             new_description: Optional[str] = None,
             new_location: Optional[str] = None,
         ) -> str:
-            """Update, reschedule, move, extend, or rename an existing Google Calendar event."""
+            """Update, reschedule, move, extend, color, or rename an existing Google Calendar event."""
             return await update_calendar_event_tool(
                 user_creds,
                 event_id=event_id,
                 summary_search=summary_search,
+                calendar_id=calendar_id,
                 new_title=new_title,
                 new_start_datetime=new_start_datetime,
                 new_end_datetime=new_end_datetime,
                 new_duration_minutes=new_duration_minutes,
+                new_color=new_color,
                 new_description=new_description,
                 new_location=new_location,
             )
+
+        async def list_user_calendars_wrapper() -> str:
+            """List all accessible Google Calendars for this user (Primary, Work, Personal, etc.)."""
+            return await list_user_calendars_tool(user_creds)
 
         async def delete_calendar_events_wrapper(
             event_ids: Optional[List[str]] = None,
@@ -1549,14 +1674,19 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 description="List upcoming Google Calendar events. Optional time_min ISO string.",
             ),
             StructuredTool.from_function(
+                coroutine=list_user_calendars_wrapper,
+                name="list_user_calendars",
+                description="List all accessible Google Calendars for this account (e.g. Primary, Work, Personal, etc.).",
+            ),
+            StructuredTool.from_function(
                 coroutine=create_event_wrapper,
                 name="create_event",
-                description="Create Google Calendar event in IST (+05:30). Supports recurrence_rule for repeating events (e.g. 'FREQ=DAILY', 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', 'FREQ=WEEKLY;BYDAY=MO', 'FREQ=MONTHLY'). Automatically creates travel time buffer if location provided. Set add_google_meet=True for Google Meet. Pass guest emails in attendees.",
+                description="Create Google Calendar event in IST (+05:30). Supports color ('blue', 'red', 'urgent', 'personal', 'green', 'yellow'), secondary calendars (calendar_id), recurrence_rule, travel buffer, and Google Meet.",
             ),
             StructuredTool.from_function(
                 coroutine=update_calendar_event_wrapper,
                 name="update_calendar_event",
-                description="Update, reschedule, move, extend, or rename an existing Google Calendar event. Provide event_id or summary_search, and modified fields (new_title, new_start_datetime, new_end_datetime, new_duration_minutes).",
+                description="Update, reschedule, move, extend, color, or rename an existing Google Calendar event. Provide event_id or summary_search, and modified fields.",
             ),
             StructuredTool.from_function(
                 coroutine=delete_calendar_events_wrapper,
@@ -1572,7 +1702,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Safe Bulk Deletions, Recurring & Travel Buffer
+        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Multi-Calendar, Color Coding & Safe Bulk Deletions
         system_prompt = (
             "System Directive: You are a high-speed calendar AI assistant. Be concise, direct, and helpful. "
             f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
@@ -1584,6 +1714,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "Instructions:\n"
             "1. When user asks about schedule or availability, call `list_events` with time_min relative to Current Local DateTime.\n"
             "2. When user asks to create/schedule an event:\n"
+            "   - If a specific calendar is mentioned by name (e.g., 'Work calendar', 'Personal calendar'), call `list_user_calendars` to resolve its calendar_id.\n"
+            "   - When a color (blue, red, green, yellow, purple, orange, cyan) or category/priority (urgent/critical -> red, fitness/gym -> green, personal/doctor -> purple/lavender, work/sync -> cyan) is requested, extract `color`.\n"
             "   - If recurring, parse frequency into valid RFC 5545 RRULE string for `recurrence_rule`:\n"
             "     * 'Every day' -> 'FREQ=DAILY'\n"
             "     * 'Every weekday' -> 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'\n"
@@ -1599,9 +1731,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "     * Present alternative slots cleanly as numbered options.\n"
             "     * If user picks an alternative slot, call `create_event` with that slot.\n"
             "     * If user says 'Schedule anyway' or 'Force schedule', call `create_event` with `ignore_conflicts=True`.\n"
-            "   - If `create_event` succeeds, give a clear confirmation with event title, start/end time in IST, recurrence/travel buffer (if any), Google Meet link (if any), attendees, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
-            "3. When user asks to edit, move, reschedule, extend, or rename an event:\n"
-            "   - Call `update_calendar_event` with summary_search='...' and new fields.\n"
+            "   - If `create_event` succeeds, give a clear confirmation with event title, start/end time in IST, location/color (if any), recurrence/travel buffer (if any), Google Meet link (if any), attendees, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "3. When user asks to edit, move, reschedule, extend, color, or rename an event:\n"
+            "   - Call `update_calendar_event` with summary_search='...' and modified fields (new_title, new_color, new_start_datetime, new_end_datetime, etc.).\n"
             "   - Compute any new datetimes in IST ('Asia/Kolkata' +05:30).\n"
             "   - Confirm the modification in 1 short sentence with the updated event title, new time in IST, and delete button.\n"
             "4. When user asks to cancel, delete, or clean up events:\n"
