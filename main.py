@@ -58,7 +58,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR) if TEMPLATES_DIR.exists
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-SECRET_KEY = os.getenv("SECRET_KEY", "ai-calendar-agent-secret-key-production-ready-2026")
+SECRET_KEY = os.getenv("SESSION_SECRET_KEY") or os.getenv("SECRET_KEY", "ai-calendar-agent-secret-key-production-ready-2026")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
 CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "Asia/Kolkata")
 
