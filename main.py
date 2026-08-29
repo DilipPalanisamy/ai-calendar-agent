@@ -849,7 +849,7 @@ async def list_accounts_endpoint(request: Request):
 async def switch_account_endpoint(request: Request, body: SwitchAccountRequest):
     """Switches the active Google account for Calendar and Gmail actions."""
     target_email = body.email.strip()
-    accounts = get_accounts_dict(request)
+    accounts = dict(get_accounts_dict(request))
 
     if target_email not in accounts:
         raise HTTPException(
@@ -864,6 +864,7 @@ async def switch_account_endpoint(request: Request, body: SwitchAccountRequest):
     request.session["user_name"] = acc_data.get("name", target_email)
     request.session["user_picture"] = acc_data.get("picture", "")
     request.session["user_creds"] = acc_data
+    request.session["accounts"] = accounts
 
     logger.info(f"Switched active account to: {target_email}")
     return JSONResponse({
@@ -877,7 +878,7 @@ async def switch_account_endpoint(request: Request, body: SwitchAccountRequest):
 async def remove_account_endpoint(request: Request, body: SwitchAccountRequest):
     """Removes a specific connected Google account from session."""
     target_email = body.email.strip()
-    accounts = get_accounts_dict(request)
+    accounts = dict(get_accounts_dict(request))
 
     if target_email not in accounts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
