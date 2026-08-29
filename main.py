@@ -623,6 +623,20 @@ async def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) ->
         return f"Failed to search Gmail invites: {str(e)}"
 
 
+def create_oauth_flow(request: Request, state: Optional[str] = None) -> Flow:
+    """Creates a configured Google OAuth 2.0 Flow instance."""
+    client_config = get_client_config()
+    redirect_uri = get_redirect_uri(request)
+
+    return Flow.from_client_config(
+        client_config=client_config,
+        scopes=SCOPES,
+        state=state,
+        redirect_uri=redirect_uri,
+        autogenerate_code_verifier=False,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 6. Google OAuth 2.0 & Multi-Account Endpoints
 # ---------------------------------------------------------------------------
@@ -644,16 +658,7 @@ async def login_page(request: Request):
 async def auth_login(request: Request):
     """Initiates Google OAuth 2.0 consent flow."""
     try:
-        client_config = get_client_config()
-        redirect_uri = get_redirect_uri(request)
-
-        flow = Flow.from_client_config(
-            client_config=client_config,
-            scopes=SCOPES,
-            redirect_uri=redirect_uri,
-            autogenerate_code_verifier=False,
-        )
-
+        flow = create_oauth_flow(request)
         authorization_url, state = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
@@ -661,7 +666,7 @@ async def auth_login(request: Request):
         )
 
         request.session["oauth_state"] = state
-        return RedirectResponse(url=authorization_url)
+        return RedirectResponse(url=authorization_url, status_code=status.HTTP_303_SEE_OTHER)
 
     except Exception as e:
         logger.error(f"Login initiation failed: {e}")
@@ -673,26 +678,17 @@ async def auth_login(request: Request):
 
 @app.get("/auth/add-account", response_class=RedirectResponse)
 async def auth_add_account(request: Request):
-    """Initiates OAuth consent flow to connect an additional Google account."""
+    """Initiates OAuth consent flow to connect an additional Google account with account selection."""
     try:
-        client_config = get_client_config()
-        redirect_uri = get_redirect_uri(request)
-
-        flow = Flow.from_client_config(
-            client_config=client_config,
-            scopes=SCOPES,
-            redirect_uri=redirect_uri,
-            autogenerate_code_verifier=False,
-        )
-
+        flow = create_oauth_flow(request)
         authorization_url, state = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
-            prompt="select_account consent",
+            prompt="select_account",
         )
 
         request.session["oauth_state"] = state
-        return RedirectResponse(url=authorization_url)
+        return RedirectResponse(url=authorization_url, status_code=status.HTTP_303_SEE_OTHER)
 
     except Exception as e:
         logger.error(f"Add account initiation failed: {e}")
@@ -717,18 +713,10 @@ async def auth_callback(request: Request):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing authorization code from Google.")
 
     try:
-        client_config = get_client_config()
-        redirect_uri = get_redirect_uri(request)
-
-        flow = Flow.from_client_config(
-            client_config=client_config,
-            scopes=SCOPES,
-            state=state,
-            redirect_uri=redirect_uri,
-            autogenerate_code_verifier=False,
-        )
+        flow = create_oauth_flow(request, state=state)
 
         auth_response_url = str(request.url)
+        redirect_uri = get_redirect_uri(request)
         if redirect_uri.startswith("https://") and auth_response_url.startswith("http://"):
             auth_response_url = auth_response_url.replace("http://", "https://", 1)
 
