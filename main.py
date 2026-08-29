@@ -45,7 +45,7 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = os.getenv("OAUTHLIB_INSECURE_TRANSPO
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 
-# Jinja2 Templates setup (points reliably to templates directory)
+# Jinja2 Templates setup
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR) if TEMPLATES_DIR.exists() else "templates")
 
 # Environment Variables
@@ -54,7 +54,7 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 SECRET_KEY = os.getenv("SECRET_KEY", "ai-calendar-agent-secret-key-production-ready-2026")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
-CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "UTC")
+CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "Asia/Kolkata")
 
 # Google OAuth 2.0 Scopes required for Calendar & Gmail
 SCOPES = [
@@ -252,7 +252,10 @@ def create_event_tool(
     location: str = "",
     attendees: Optional[List[str]] = None,
 ) -> str:
-    """Creates a new event on user's primary Google Calendar after conflict checking."""
+    """
+    Creates a new event on user's primary Google Calendar after conflict checking.
+    start_time and end_time can be ISO 8601 strings (e.g. '2026-08-30T15:00:00' or with timezone offset).
+    """
     try:
         service = build("calendar", "v3", credentials=creds)
 
@@ -263,8 +266,8 @@ def create_event_tool(
                 service.events()
                 .list(
                     calendarId="primary",
-                    timeMin=start_time,
-                    timeMax=end_time,
+                    timeMin=start_time if "T" in start_time else f"{start_time}T00:00:00Z",
+                    timeMax=end_time if "T" in end_time else f"{end_time}T23:59:59Z",
                     singleEvents=True,
                 )
                 .execute()
@@ -272,15 +275,16 @@ def create_event_tool(
             conflicts = overlap_check.get("items", [])
             if conflicts:
                 conflict_names = [f"'{c.get('summary', 'Untitled')}'" for c in conflicts]
-                conflict_msg = f"⚠️ Conflict Notice: You already have event(s) scheduled at this time: {', '.join(conflict_names)}."
+                conflict_msg = f"⚠️ Conflict Notice: You already have event(s) during this time: {', '.join(conflict_names)}."
         except Exception as check_err:
             logger.warning(f"Conflict check warning: {check_err}")
 
+        # Construct event payload
         event_body: Dict[str, Any] = {
             "summary": summary,
             "description": description or "Scheduled via AI Calendar Agent",
-            "start": {"dateTime": start_time},
-            "end": {"dateTime": end_time},
+            "start": {"dateTime": start_time, "timeZone": CALENDAR_TIMEZONE},
+            "end": {"dateTime": end_time, "timeZone": CALENDAR_TIMEZONE},
         }
 
         if location:
@@ -494,7 +498,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     AI Chatbot endpoint:
     - Validates user authentication.
     - Dynamically binds user Google Calendar and Gmail tools.
-    - Runs Gemini 2.5 Flash with tool calling support.
+    - Runs Gemini 1.5 Flash with fallback support.
     """
     user_creds = get_user_credentials(request)
     if not user_creds:
@@ -556,7 +560,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             StructuredTool.from_function(
                 func=create_event_wrapper,
                 name="create_event",
-                description="Create a new event on Google Calendar with conflict checking. start_time and end_time must be ISO 8601 format.",
+                description="Create a new event on Google Calendar with conflict checking. start_time and end_time must be ISO 8601 strings (e.g. 'YYYY-MM-DDTHH:MM:SS').",
             ),
             StructuredTool.from_function(
                 func=check_gmail_invites_wrapper,
@@ -576,7 +580,11 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "Instructions:\n"
             "1. You have dynamic access to the user's Google Calendar and Gmail tools.\n"
             "2. When the user asks about their schedule, events, or availability, call `list_events`.\n"
-            "3. When creating an event, parse dates and times relative to Current DateTime, calculate proper ISO start and end times, and call `create_event`. Always inform the user if there are any conflicting events.\n"
+            "3. When the user asks to create/schedule an event (e.g., 'meeting with friends tomorrow at 3 PM'):\n"
+            "   - Calculate start_time and end_time (defaulting to 1 hour duration if unspecified) relative to Current DateTime.\n"
+            "   - Format start_time and end_time as ISO 8601 strings (e.g. 'YYYY-MM-DDTHH:MM:SS').\n"
+            "   - Call `create_event` with summary, start_time, end_time, description, location, and attendees.\n"
+            "   - Inform the user of successful creation with title, start/end time, location, and include the clickable Google Calendar link.\n"
             "4. When the user asks about emails, tea, coffee, or meeting invitations, call `check_gmail_invites` and summarize relevant findings with clear options to schedule them.\n"
             "5. Format output using clean Markdown, bullet points, and nice styling. Include clickable links if available."
         )
