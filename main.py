@@ -499,7 +499,7 @@ def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Serves the dedicated Login/Sign Up page for unauthenticated users."""
-    if request.session.get("user_creds"):
+    if request.session.get("user_creds") and request.session.get("user_email"):
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     try:
@@ -934,11 +934,11 @@ async def serve_index(request: Request):
     Renders the ChatGPT-style modern web interface for authenticated users.
     Redirects unauthenticated visitors to /login.
     """
+    user_email = request.session.get("user_email")
     user_creds = request.session.get("user_creds")
-    if not user_creds:
+    if not user_creds or not user_email:
         return RedirectResponse(url="/login", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
-    user_email = request.session.get("user_email", "")
     user_name = request.session.get("user_name", "User")
     user_picture = request.session.get("user_picture", "")
 
