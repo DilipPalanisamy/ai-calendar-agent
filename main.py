@@ -47,9 +47,21 @@ logger = logging.getLogger("ai_calendar_agent")
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = os.getenv("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 # Base directory & Templates configuration
+# Base directory & Persistent Database configuration
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
-DB_PATH = BASE_DIR / "chat_history.db"
+
+# Support persistent volume disk on cloud platforms (e.g., Render Persistent Disks at /var/data)
+data_dir_env = os.getenv("DATA_DIR") or os.getenv("DATABASE_DIR")
+if data_dir_env:
+    data_dir = Path(data_dir_env)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    DB_PATH = data_dir / "chat_history.db"
+elif os.getenv("DATABASE_PATH"):
+    DB_PATH = Path(os.getenv("DATABASE_PATH"))
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+else:
+    DB_PATH = BASE_DIR / "chat_history.db"
 
 # Jinja2 Templates setup
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR) if TEMPLATES_DIR.exists() else "templates")
@@ -100,10 +112,13 @@ SCOPES = [
 # 2. SQLite Database Setup & Chat History Management
 # ---------------------------------------------------------------------------
 def get_db_connection() -> sqlite3.Connection:
-    """Creates a connection to the SQLite database with row access."""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    """Creates a thread-safe connection to the SQLite database with WAL mode."""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA busy_timeout = 30000;")
     return conn
 
 
