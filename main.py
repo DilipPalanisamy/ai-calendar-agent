@@ -1211,6 +1211,10 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 ]
 
                 for _ in range(max_iterations):
+                    if await request.is_disconnected():
+                        logger.info(f"Client disconnected for user '{active_email}'. Cancelling AI generation.")
+                        return JSONResponse({"status": "cancelled", "message": "Request cancelled by user."}, status_code=200)
+
                     response = await llm_with_tools.ainvoke(messages)
                     messages.append(response)
 
@@ -1233,6 +1237,11 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                         else:
                             final_text = str(content_raw) if content_raw else ""
                         break
+
+                    # Check client disconnection before executing tools
+                    if await request.is_disconnected():
+                        logger.info(f"Client disconnected before tool execution for user '{active_email}'. Cancelling.")
+                        return JSONResponse({"status": "cancelled", "message": "Request cancelled by user."}, status_code=200)
 
                     # Execute tool calls asynchronously
                     for tool_call in response.tool_calls:
@@ -1257,8 +1266,11 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 if final_text:
                     break
 
+            except asyncio.CancelledError:
+                logger.info(f"Task cancelled by client for user '{active_email}'.")
+                return JSONResponse({"status": "cancelled", "message": "Request cancelled by user."}, status_code=200)
             except Exception as candidate_err:
-                logger.warning(f"Model '{model_name}' invocation failed: {candidate_err}. Attempting fallback...")
+                logger.warning(f"Model '{model_name}' execution attempt failed: {candidate_err}. Trying fallback model...")
                 last_error = candidate_err
                 continue
 

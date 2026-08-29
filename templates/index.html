@@ -936,7 +936,7 @@
         }
 
         /* ----------------------------------------------------
-           Input Bar (Mobile-Optimized with 16px font & safe areas)
+           Input Bar & Stop Button (Mobile-Optimized)
            ---------------------------------------------------- */
         .chat-input-area {
             padding: 0.75rem 1rem;
@@ -1012,6 +1012,22 @@
             color: var(--text-muted);
             cursor: not-allowed;
             transform: none;
+        }
+
+        .btn-send.stop-mode {
+            background: #ef4444 !important;
+            box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+            animation: pulseStop 1.5s infinite ease-in-out;
+        }
+
+        .btn-send.stop-mode:hover, .btn-send.stop-mode:active {
+            background: #dc2626 !important;
+            transform: scale(1.08);
+        }
+
+        @keyframes pulseStop {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+            50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
         }
 
         /* ----------------------------------------------------
@@ -1193,7 +1209,7 @@
                             <i class="fa-solid fa-robot"></i>
                         </div>
                         <h1 class="welcome-title">How can I assist your schedule?</h1>
-                        <p class="welcome-subtitle">I can create and delete Google Calendar events, find conflicts, and scan your Gmail for invitations.</p>
+                        <p class="welcome-subtitle">I can create and delete Google Calendar events, find conflicts, and scan your Gmail for invitations in IST.</p>
 
                         <div class="prompt-grid">
                             <div class="prompt-card" onclick="sendPrompt('What upcoming events do I have on my calendar this week?')">
@@ -1219,7 +1235,7 @@
                 </div>
             </div>
 
-            <!-- Input Bar -->
+            <!-- Input Bar with Send & Stop Generating Button -->
             <div class="chat-input-area">
                 <div class="input-wrapper">
                     <textarea 
@@ -1227,7 +1243,7 @@
                         class="chat-input" 
                         placeholder="Message AI Calendar Agent..." 
                         rows="1"></textarea>
-                    <button class="btn-send" id="btn-send" title="Send Message">
+                    <button class="btn-send" id="btn-send" title="Send Message" aria-label="Send Message">
                         <i class="fa-solid fa-paper-plane"></i>
                     </button>
                 </div>
@@ -1240,6 +1256,7 @@
         // State
         let activeSessionId = null;
         let isProcessing = false;
+        let currentAbortController = null;
         let activeAccountEmail = "{{ user_email }}";
 
         // DOM Elements
@@ -1304,7 +1321,11 @@
         chatInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                sendMessage();
+                if (isProcessing && currentAbortController) {
+                    stopGeneration();
+                } else {
+                    sendMessage();
+                }
             }
         });
 
@@ -1317,9 +1338,46 @@
             scrollToBottom();
         });
 
-        btnSend.addEventListener('click', () => sendMessage());
+        // Send & Stop Button State Management
+        function setGeneratingState(generating) {
+            isProcessing = generating;
+            if (generating) {
+                btnSend.disabled = false;
+                btnSend.classList.add('stop-mode');
+                btnSend.setAttribute('title', 'Stop Generation (Cancel Request)');
+                btnSend.setAttribute('aria-label', 'Stop Generation');
+                btnSend.innerHTML = '<i class="fa-solid fa-stop"></i>';
+            } else {
+                btnSend.classList.remove('stop-mode');
+                btnSend.setAttribute('title', 'Send Message');
+                btnSend.setAttribute('aria-label', 'Send Message');
+                btnSend.innerHTML = '<i class="fa-solid fa-paper-plane"></i>';
+            }
+        }
+
+        function stopGeneration() {
+            if (currentAbortController) {
+                currentAbortController.abort();
+                currentAbortController = null;
+            }
+            removeThinkingIndicator();
+            setGeneratingState(false);
+            appendMessage("*[Response stopped by user]*", "assistant");
+            chatInput.focus();
+        }
+
+        btnSend.addEventListener('click', () => {
+            if (isProcessing && currentAbortController) {
+                stopGeneration();
+            } else {
+                sendMessage();
+            }
+        });
 
         function sendPrompt(promptText) {
+            if (isProcessing) {
+                stopGeneration();
+            }
             chatInput.value = promptText;
             sendMessage();
         }
@@ -1582,7 +1640,7 @@
         }
 
         // ----------------------------------------------------
-        // Chat History API Management (Robust Touch & Click Delegation)
+        // Chat History API Management
         // ----------------------------------------------------
         async function loadHistory() {
             try {
@@ -1650,10 +1708,10 @@
         async function selectSession(sessionId) {
             if (!sessionId) return;
             
-            // Reset any stuck processing states so session loads immediately
-            isProcessing = false;
-            removeThinkingIndicator();
-            btnSend.disabled = false;
+            if (isProcessing && currentAbortController) {
+                stopGeneration();
+            }
+
             activeSessionId = sessionId;
 
             try {
@@ -1685,9 +1743,9 @@
         }
 
         function startNewChat() {
-            isProcessing = false;
-            removeThinkingIndicator();
-            btnSend.disabled = false;
+            if (isProcessing && currentAbortController) {
+                stopGeneration();
+            }
             activeSessionId = null;
             chatMessages.innerHTML = '';
             welcomeScreen.style.display = 'flex';
@@ -1738,14 +1796,14 @@
         clearAllHistoryBtn.addEventListener('click', clearAllHistory);
 
         // ----------------------------------------------------
-        // Send Message Handler
+        // Send Message Handler with AbortController Support
         // ----------------------------------------------------
         async function sendMessage() {
             const message = chatInput.value.trim();
             if (!message || isProcessing) return;
 
-            isProcessing = true;
-            btnSend.disabled = true;
+            currentAbortController = new AbortController();
+            setGeneratingState(true);
             chatInput.value = '';
             chatInput.style.height = 'auto';
 
@@ -1759,7 +1817,8 @@
                     body: JSON.stringify({
                         message: message,
                         session_id: activeSessionId
-                    })
+                    }),
+                    signal: currentAbortController.signal
                 });
 
                 removeThinkingIndicator();
@@ -1776,6 +1835,11 @@
                 }
 
                 const data = await response.json();
+                if (data.status === 'cancelled') {
+                    appendMessage("*[Response stopped by user]*", 'assistant');
+                    return;
+                }
+
                 activeSessionId = data.session_id || activeSessionId;
                 if (data.title) {
                     currentChatTitle.textContent = data.title;
@@ -1786,10 +1850,14 @@
 
             } catch (err) {
                 removeThinkingIndicator();
-                appendMessage(`⚠️ **Connection Error**: ${err.message}`, 'assistant');
+                if (err.name === 'AbortError') {
+                    console.log("Chat generation cancelled by client.");
+                } else {
+                    appendMessage(`⚠️ **Connection Error**: ${err.message}`, 'assistant');
+                }
             } finally {
-                isProcessing = false;
-                btnSend.disabled = false;
+                currentAbortController = null;
+                setGeneratingState(false);
                 chatInput.focus();
             }
         }
