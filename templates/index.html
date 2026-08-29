@@ -1547,7 +1547,7 @@
                 const res = await fetch('/api/accounts');
                 if (!res.ok) return;
                 const data = await res.json();
-                const accounts = data.accounts || [];
+                const rawAccounts = data.accounts || [];
                 activeAccountEmail = data.active_account;
 
                 if (data.notice) {
@@ -1556,34 +1556,40 @@
 
                 dropdownAccountsList.innerHTML = '';
 
-                accounts.forEach(acc => {
+                rawAccounts.forEach(acc => {
+                    const email = typeof acc === 'object' ? (acc.email || '') : String(acc);
+                    const name = typeof acc === 'object' ? (acc.name || email) : email;
+                    const picture = typeof acc === 'object' ? (acc.picture || '') : '';
+                    const isActive = (email === activeAccountEmail) || (typeof acc === 'object' && acc.is_active);
+
                     const item = document.createElement('div');
-                    item.className = `dropdown-account-item ${acc.is_active ? 'active' : ''}`;
+                    item.className = `dropdown-account-item ${isActive ? 'active' : ''}`;
                     
-                    const avatarHtml = acc.picture 
-                        ? `<img src="${escapeHtml(acc.picture)}" alt="${escapeHtml(acc.name)}">`
-                        : `<i class="fa-solid fa-user"></i>`;
+                    const initial = (name || email || 'U').charAt(0).toUpperCase();
+                    const avatarHtml = picture 
+                        ? `<img src="${escapeHtml(picture)}" alt="${escapeHtml(name)}">`
+                        : `<span style="font-weight: 700; color: white;">${initial}</span>`;
 
                     item.innerHTML = `
-                        <div class="account-item-left" onclick="switchAccount('${escapeHtml(acc.email)}')">
+                        <div class="account-item-left" onclick="switchAccount('${escapeHtml(email)}')">
                             <div class="account-item-avatar">${avatarHtml}</div>
                             <div class="account-item-text">
-                                <span class="account-item-name">${escapeHtml(acc.name)}</span>
-                                <span class="account-item-email">${escapeHtml(acc.email)}</span>
+                                <span class="account-item-name">${escapeHtml(name)}</span>
+                                <span class="account-item-email">${escapeHtml(email)}</span>
                             </div>
                         </div>
                         <div class="account-item-actions">
-                            ${acc.is_active ? '<i class="fa-solid fa-circle-check active-check" title="Active Account"></i>' : ''}
-                            ${accounts.length > 1 ? `<button class="btn-remove-account" onclick="removeAccount('${escapeHtml(acc.email)}', event)" title="Disconnect Account"><i class="fa-solid fa-xmark"></i></button>` : ''}
+                            ${isActive ? '<i class="fa-solid fa-circle-check active-check" title="Active Account"></i>' : ''}
+                            ${rawAccounts.length > 1 ? `<button class="btn-remove-account" onclick="removeAccount('${escapeHtml(email)}', event)" title="Disconnect Account"><i class="fa-solid fa-xmark"></i></button>` : ''}
                         </div>
                     `;
                     dropdownAccountsList.appendChild(item);
 
-                    if (acc.is_active) {
-                        headerAccountEmail.textContent = acc.email;
+                    if (isActive) {
+                        headerAccountEmail.textContent = email;
                         headerAccountAvatar.innerHTML = avatarHtml;
-                        sidebarUserEmail.textContent = acc.email;
-                        sidebarUserName.textContent = acc.name || acc.email;
+                        sidebarUserEmail.textContent = email;
+                        sidebarUserName.textContent = name;
                         sidebarUserAvatar.innerHTML = avatarHtml;
                     }
                 });
