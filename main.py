@@ -70,7 +70,7 @@ SCOPES = [
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="AI Calendar Agent",
-    description="Multi-user AI Calendar & Gmail Assistant powered by Gemini 2.5 Flash & FastAPI",
+    description="Multi-user AI Calendar & Gmail Assistant powered by Gemini & FastAPI",
     version="2.0.0",
 )
 
@@ -582,68 +582,77 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         )
 
         # 3. Initialize Gemini LLM with bound tools
-        model_candidates = [
-            os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-        ]
+        configured_model = (os.getenv("GEMINI_MODEL") or "gemini-1.5-flash").strip()
+        if configured_model in {"gemini-2.5-flash", "models/gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash"}:
+            configured_model = "gemini-1.5-flash"
 
-        llm = None
+        model_candidates = [
+            configured_model,
+            "gemini-1.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+        ]
+        seen = set()
+        unique_candidates = [m for m in model_candidates if m and not (m in seen or seen.add(m))]
+
+        # 4. Multi-turn Agent Execution Loop with Model Fallback
+        max_iterations = 6
+        final_text = ""
         last_error = None
-        for candidate in model_candidates:
+
+        for model_name in unique_candidates:
             try:
                 llm = ChatGoogleGenerativeAI(
-                    model=candidate,
+                    model=model_name,
                     google_api_key=GEMINI_API_KEY,
                     temperature=0.2,
                 )
-                break
-            except Exception as model_err:
-                last_error = model_err
+                llm_with_tools = llm.bind_tools(tools)
 
-        if not llm:
-            raise RuntimeError(f"Could not initialize Gemini model: {last_error}")
+                messages = [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_message),
+                ]
 
-        llm_with_tools = llm.bind_tools(tools)
+                for _ in range(max_iterations):
+                    response = await llm_with_tools.ainvoke(messages)
+                    messages.append(response)
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ]
+                    if not response.tool_calls:
+                        final_text = response.content
+                        break
 
-        # 4. Multi-turn Agent Execution Loop
-        max_iterations = 6
-        final_text = ""
+                    # Execute tool calls
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_args = tool_call["args"]
+                        tool_id = tool_call.get("id", tool_name)
 
-        for _ in range(max_iterations):
-            response = await llm_with_tools.ainvoke(messages)
-            messages.append(response)
+                        logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
 
-            if not response.tool_calls:
-                final_text = response.content
-                break
+                        if tool_name in tool_map:
+                            try:
+                                tool_func = tool_map[tool_name]
+                                tool_result = tool_func.invoke(tool_args)
+                            except Exception as tool_exec_err:
+                                logger.error(f"Error running tool {tool_name}: {tool_exec_err}")
+                                tool_result = f"Error executing {tool_name}: {str(tool_exec_err)}"
+                        else:
+                            tool_result = f"Tool '{tool_name}' not found."
 
-            # Execute tool calls
-            for tool_call in response.tool_calls:
-                tool_name = tool_call["name"]
-                tool_args = tool_call["args"]
-                tool_id = tool_call.get("id", tool_name)
+                        messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
 
-                logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
+                if final_text:
+                    break
 
-                if tool_name in tool_map:
-                    try:
-                        tool_func = tool_map[tool_name]
-                        tool_result = tool_func.invoke(tool_args)
-                    except Exception as tool_exec_err:
-                        logger.error(f"Error running tool {tool_name}: {tool_exec_err}")
-                        tool_result = f"Error executing {tool_name}: {str(tool_exec_err)}"
-                else:
-                    tool_result = f"Tool '{tool_name}' not found."
-
-                messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
+            except Exception as candidate_err:
+                logger.warning(f"Model '{model_name}' invocation failed: {candidate_err}. Attempting fallback...")
+                last_error = candidate_err
+                continue
 
         if not final_text:
+            if last_error:
+                raise last_error
             final_text = "I processed your request. Let me know if you need anything else with your schedule or emails!"
 
         return JSONResponse({"response": final_text})
