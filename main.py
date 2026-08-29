@@ -488,10 +488,11 @@ async def create_event_tool(
     description: str = "",
     location: str = "",
     attendees: Optional[List[str]] = None,
+    add_google_meet: bool = False,
     ignore_conflicts: bool = False,
 ) -> str:
     """
-    Creates a new event on user's primary Google Calendar with smart conflict detection and automated alternative slot suggestions in IST.
+    Creates a new event on user's primary Google Calendar with smart conflict detection, Google Meet video link generation, and guest invitations in IST.
     """
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
@@ -631,8 +632,32 @@ async def create_event_tool(
         if attendees:
             event_body["attendees"] = [{"email": email.strip()} for email in attendees if email.strip()]
 
+        if add_google_meet:
+            req_id = f"meet-{uuid.uuid4().hex[:8]}-{int(datetime.now().timestamp())}"
+            event_body["conferenceData"] = {
+                "createRequest": {
+                    "requestId": req_id,
+                    "conferenceSolutionKey": {"type": "hangoutsMeet"}
+                }
+            }
+
+        insert_kwargs: Dict[str, Any] = {
+            "calendarId": "primary",
+            "body": event_body,
+        }
+        if add_google_meet:
+            insert_kwargs["conferenceDataVersion"] = 1
+        if attendees:
+            insert_kwargs["sendUpdates"] = "all"
+
         created_event = await asyncio.to_thread(
-            service.events().insert(calendarId="primary", body=event_body).execute
+            service.events().insert(**insert_kwargs).execute
+        )
+
+        meet_link = (
+            created_event.get("hangoutLink")
+            or created_event.get("conferenceData", {}).get("entryPoints", [{}])[0].get("uri")
+            or None
         )
 
         result = {
@@ -640,6 +665,8 @@ async def create_event_tool(
             "message": f"Successfully created event: '{summary}'",
             "event_id": created_event.get("id"),
             "htmlLink": created_event.get("htmlLink"),
+            "google_meet_link": meet_link,
+            "attendees": attendees if attendees else [],
             "start": norm_start,
             "end": norm_end,
             "timeZone": CALENDAR_TIMEZONE,
@@ -1380,9 +1407,10 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             description: str = "",
             location: str = "",
             attendees: Optional[List[str]] = None,
+            add_google_meet: bool = False,
             ignore_conflicts: bool = False,
         ) -> str:
-            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection and automated alternative slot suggestions."""
+            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection, Google Meet video link generation, and attendee invitations."""
             return await create_event_tool(
                 user_creds,
                 summary=summary,
@@ -1391,6 +1419,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 description=description,
                 location=location,
                 attendees=attendees,
+                add_google_meet=add_google_meet,
                 ignore_conflicts=ignore_conflicts,
             )
 
@@ -1438,7 +1467,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             StructuredTool.from_function(
                 coroutine=create_event_wrapper,
                 name="create_event",
-                description="Create Google Calendar event in IST (+05:30). Returns conflict details and alternative slots if time is occupied. Set ignore_conflicts=True to force schedule.",
+                description="Create Google Calendar event in IST (+05:30). Set add_google_meet=True to generate a Google Meet video call link. Pass guest email addresses in attendees list.",
             ),
             StructuredTool.from_function(
                 coroutine=update_calendar_event_wrapper,
@@ -1459,7 +1488,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Smart Conflict & Event Editing
+        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Smart Conflict & Google Meet
         system_prompt = (
             "System Directive: You are a high-speed calendar AI assistant. Be concise, direct, and helpful. "
             f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
@@ -1470,7 +1499,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             f"Default Timezone: {CALENDAR_TIMEZONE} (UTC+5:30)\n\n"
             "Instructions:\n"
             "1. When user asks about schedule or availability, call `list_events` with time_min relative to Current Local DateTime.\n"
-            "2. When user asks to create/schedule an event (e.g., '3 PM meeting tomorrow'):\n"
+            "2. When user asks to create/schedule an event:\n"
+            "   - Extract guest emails into `attendees` (e.g. ['colleague@example.com']).\n"
+            "   - Set `add_google_meet=True` if the user mentions Google Meet, video call, meeting link, online sync, or invites guests.\n"
             "   - Compute start_time and end_time in IST with '+05:30' offset and call `create_event`.\n"
             "   - If `create_event` returns `conflict_detected`:\n"
             "     * Inform the user clearly: \"You already have '[Conflicting Event]' scheduled at [Time].\"\n"
@@ -1480,11 +1511,15 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "       - Option 3: [Slot 3]\n"
             "     * If user picks an alternative slot, call `create_event` with that slot.\n"
             "     * If user says 'Schedule anyway' or 'Force schedule', call `create_event` with `ignore_conflicts=True`.\n"
-            "   - If `create_event` succeeds, give a 1-sentence confirmation with event title, start/end time in IST, clickable link, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
-            "3. When user asks to edit, move, reschedule, extend, or rename an event (e.g. 'Move my 4 PM meeting to 5 PM', 'Extend workout by 30 mins', 'Rename sync to Strategy'):\n"
-            "   - You can call `update_calendar_event` directly with summary_search='...' and new fields (or search via `list_events` first if needed).\n"
+            "   - If `create_event` succeeds, give a clear confirmation with:\n"
+            "     * Event title, start/end time in IST, and calendar event link.\n"
+            "     * If a Google Meet link was created, display it as a clickable link: '[📹 Join with Google Meet](MEET_URL)'.\n"
+            "     * If attendees were invited, mention them: 'Invites sent to: [emails]'.\n"
+            "     * Include delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "3. When user asks to edit, move, reschedule, extend, or rename an event:\n"
+            "   - Call `update_calendar_event` with summary_search='...' and new fields.\n"
             "   - Compute any new datetimes in IST ('Asia/Kolkata' +05:30).\n"
-            "   - Confirm the modification in 1 short sentence with the updated event title, new time in IST, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "   - Confirm the modification in 1 short sentence with the updated event title, new time in IST, and delete button.\n"
             "4. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
             "5. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
         )
