@@ -1,545 +1,672 @@
-from contextlib import asynccontextmanager
 import os
-import datetime
-import asyncio
-from zoneinfo import ZoneInfo
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
-import requests
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
+# Google Auth & API Client Libraries
+from google.auth.transport.requests import Request as GoogleRequest
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+# LangChain & Gemini
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.tools import Tool
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 
-import calendar_service as calendar_service_module
-from parser import parse_schedule_message
-
-# ---------------------------------------------------------
-# 📦 LANGCHAIN AGENT IMPORT FALLBACKS
-# ---------------------------------------------------------
-USING_MODERN_CREATE_AGENT = False
-
-try:
-    from langchain.agents import create_react_agent, AgentExecutor
-    from langchain import hub
-    MODERN_REACT_AVAILABLE = True
-except ImportError:
-    MODERN_REACT_AVAILABLE = False
-
-if not MODERN_REACT_AVAILABLE:
-    try:
-        from langchain.agents import create_agent
-        USING_MODERN_CREATE_AGENT = True
-    except ImportError:
-        create_agent = None
-
+# ---------------------------------------------------------------------------
+# 1. Environment & Setup
+# ---------------------------------------------------------------------------
 load_dotenv()
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-ALLOWED_CHAT_ID = os.getenv("ALLOWED_CHAT_ID")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Saved after first user message
-CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE") or "Asia/Kolkata"
-GOOGLE_CALENDAR_URL = "https://calendar.google.com/calendar/r"
-PENDING_GMAIL_EVENTS = {}
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("ai_calendar_agent")
 
+# Enable OAuth insecure transport during local development (HTTP)
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = os.getenv("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
-def get_gemini_model_candidates(preferred_model: str | None = None):
-    """Return a safe list of Gemini model names, avoiding legacy unsupported ones."""
-    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-3.5-flash").strip()
-    normalized = configured_model.removeprefix("models/") if configured_model.startswith("models/") else configured_model
+# Base directory & Templates
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = BASE_DIR / "templates"
 
-    candidates = []
-    if normalized and normalized not in {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest"}:
-        candidates.append(normalized)
-
-    for fallback_model in ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "gemini-2.0-flash"]:
-        if fallback_model not in candidates:
-            candidates.append(fallback_model)
-
-    return candidates
-
-
-# ---------------------------------------------------------
-# ⚙️ FASTAPI LIFESPAN & SCHEDULER SETUP
-# ---------------------------------------------------------
-scheduler = AsyncIOScheduler()
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: Schedule background tasks and sync calendar timezone
-    try:
-        if calendar_service is not None:
-            calendar_service_module.sync_calendar_timezone(calendar_service, CALENDAR_TIMEZONE)
-    except Exception as exc:
-        print(f"Warning: Could not sync calendar timezone on startup: {exc}")
-
-    scheduler.add_job(check_upcoming_reminders, 'interval', minutes=5)
-    scheduler.add_job(auto_scan_tea_invites, 'interval', minutes=15)
-    scheduler.add_job(send_daily_briefing, 'cron', hour=8, minute=0)
-    scheduler.start()
-    
-    yield  # Application runs
-    
-    # Shutdown
-    scheduler.shutdown()
-
-app = FastAPI(lifespan=lifespan)
-
-# Initialize Google Calendar & Gmail Service
 try:
-    creds = calendar_service_module.get_google_credentials()
-    calendar_service = build('calendar', 'v3', credentials=creds)
-    CALENDAR_INIT_ERROR = None
-except Exception as exc:  # pragma: no cover - runtime fallback
-    creds = None
-    calendar_service = None
-    CALENDAR_INIT_ERROR = (
-        f"{exc}. On Render, set GOOGLE_TOKEN_BASE64 to the base64 contents of token.json."
-    )
+    from fastapi.templating import Jinja2Templates
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR)) if TEMPLATES_DIR.exists() else None
+except Exception:
+    templates = None
 
+# Environment Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+SECRET_KEY = os.getenv("SECRET_KEY", "ai-calendar-agent-secret-key-super-secure-change-in-prod-12345")
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
+CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "UTC")
 
-# ---------------------------------------------------------
-# 📅 GOOGLE CALENDAR TOOLS & CONFLICT DETECTION
-# ---------------------------------------------------------
-
-def get_calendar_link(query: str = "") -> str:
-    """Returns the Google Calendar web URL to view and manage events."""
-    return f"📅 Google Calendar Link: {GOOGLE_CALENDAR_URL}"
-
-
-def list_events(query: str = "") -> str:
-    """Lists events for today or upcoming days in the configured timezone."""
-    if calendar_service is None:
-        return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
-
-    now = datetime.datetime.now(ZoneInfo(CALENDAR_TIMEZONE)).astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
-    events_result = calendar_service.events().list(
-        calendarId='primary', timeMin=now,
-        maxResults=10, singleEvents=True, orderBy='startTime'
-    ).execute()
-    events = events_result.get('items', [])
-    
-    if not events:
-        return "No upcoming events found."
-    
-    output = []
-    for event in events:
-        start = event['start'].get('dateTime', event['start'].get('date'))
-        if start and 'T' in start:
-            start_clean = start.replace('Z', '+00:00')
-            start_dt = datetime.datetime.fromisoformat(start_clean)
-            if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=ZoneInfo(CALENDAR_TIMEZONE))
-            else:
-                start_dt = start_dt.astimezone(ZoneInfo(CALENDAR_TIMEZONE))
-            start_formatted = start_dt.strftime('%Y-%m-%d %I:%M %p')
-        else:
-            start_formatted = start
-        output.append(f"ID: {event['id']} | Summary: {event.get('summary')} | Start: {start_formatted}")
-    return "\n".join(output)
-
-
-def create_event(details: str) -> str:
-    """
-    Creates an event with conflict detection.
-    Expects input format: 'Summary | StartISO | EndISO'
-    Example: 'Team Sync | 2026-08-06T10:00:00 | 2026-08-06T11:00:00'
-    """
-    if calendar_service is None:
-        return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
-
-    try:
-        parts = [p.strip() for p in details.split('|')]
-        summary, raw_start, raw_end = parts[0], parts[1], parts[2]
-        
-        start_time = calendar_service_module._format_rfc3339_with_tz(raw_start, CALENDAR_TIMEZONE)
-        end_time = calendar_service_module._format_rfc3339_with_tz(raw_end, CALENDAR_TIMEZONE)
-
-        # Conflict Detection Check
-        conflicts = calendar_service_module.check_calendar_conflict(start_time, end_time)
-        if conflicts:
-            conflict_names = ", ".join(conflicts)
-            return f"⚠️ CONFLICT DETECTED! You already have these event(s) at this time: {conflict_names}. Ask the user if they still want to proceed or reschedule."
-        
-        event_body = {
-            'summary': summary,
-            'start': {'dateTime': start_time, 'timeZone': CALENDAR_TIMEZONE},
-            'end': {'dateTime': end_time, 'timeZone': CALENDAR_TIMEZONE},
-        }
-        created = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
-        return f"✅ Event created successfully: '{created.get('summary')}' at {start_time} ({CALENDAR_TIMEZONE})"
-    except Exception as e:
-        return f"Error creating event: {str(e)}"
-
-
-def delete_event(event_id: str) -> str:
-    """Deletes an event given its Event ID."""
-    if calendar_service is None:
-        return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
-
-    try:
-        calendar_service.events().delete(calendarId='primary', eventId=event_id.strip()).execute()
-        return f"🗑️ Event '{event_id}' deleted successfully."
-    except Exception as e:
-        return f"Error deleting event: {str(e)}"
-
-
-def update_event(details: str) -> str:
-    """
-    Updates an event time or summary.
-    Expects input format: 'EventID | NewSummary | NewStartISO | NewEndISO'
-    """
-    if calendar_service is None:
-        return f"Calendar service is unavailable: {CALENDAR_INIT_ERROR or 'missing credentials'}"
-
-    try:
-        parts = [p.strip() for p in details.split('|')]
-        event_id, summary, raw_start, raw_end = parts[0], parts[1], parts[2], parts[3]
-        
-        start_time = calendar_service_module._format_rfc3339_with_tz(raw_start, CALENDAR_TIMEZONE)
-        end_time = calendar_service_module._format_rfc3339_with_tz(raw_end, CALENDAR_TIMEZONE)
-
-        event = calendar_service.events().get(calendarId='primary', eventId=event_id).execute()
-        event['summary'] = summary
-        event['start'] = {'dateTime': start_time, 'timeZone': CALENDAR_TIMEZONE}
-        event['end'] = {'dateTime': end_time, 'timeZone': CALENDAR_TIMEZONE}
-        
-        updated = calendar_service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
-        return f"✏️ Event updated: '{updated.get('summary')}' is now at {start_time} ({CALENDAR_TIMEZONE})"
-    except Exception as e:
-        return f"Error updating event: {str(e)}"
-
-
-# ---------------------------------------------------------
-# 📧 GMAIL TOOLS
-# ---------------------------------------------------------
-
-def check_gmail_for_invites(query: str = "") -> str:
-    """Checks unread Gmail messages for Drive or internship messages."""
-    if creds is None:
-        return "Google account is not authenticated yet. Please complete the sign-in flow to create token.json."
-
-    try:
-        gmail_service = build('gmail', 'v1', credentials=creds)
-        results = gmail_service.users().messages().list(
-            userId='me', q='is:unread (drive OR internship)'
-        ).execute()
-        
-        messages = results.get('messages', [])
-        if not messages:
-            return "No unread Drive or internship messages found in Gmail."
-
-        invites = []
-        for msg in messages[:5]:
-            email = gmail_service.users().messages().get(userId='me', id=msg['id']).execute()
-            snippet = email.get('snippet', '')
-            headers = {
-                header.get('name', '').lower(): header.get('value', '')
-                for header in email.get('payload', {}).get('headers', [])
-            }
-            short_snippet = ' '.join(snippet.split())[:280]
-            invites.append(
-                f"Email ID: {msg['id']} | Subject: {headers.get('subject', 'No subject')} | Content: {short_snippet}"
-            )
-
-        return "\n".join(invites)
-    except Exception as e:
-        return f"Error reading Gmail: {str(e)}"
-
-
-# ---------------------------------------------------------
-# 🛠️ TOOLS & AGENT SETUP
-# ---------------------------------------------------------
-
-tools = [
-    Tool(name="GetCalendarLink", func=get_calendar_link, description="Returns the Google Calendar web URL to view and manage events."),
-    Tool(name="ListEvents", func=list_events, description="Lists upcoming calendar events."),
-    Tool(name="CreateEvent", func=create_event, description="Creates a new event. Format: 'Summary | StartISO | EndISO'"),
-    Tool(name="DeleteEvent", func=delete_event, description="Deletes an event using its Event ID."),
-    Tool(name="UpdateEvent", func=update_event, description="Updates an event. Format: 'EventID | Summary | StartISO | EndISO'"),
-    Tool(name="CheckGmailInvites", func=check_gmail_for_invites, description="Checks unread Gmail messages for Drive or internship messages.")
+# Google OAuth 2.0 Scopes required for Calendar & Gmail
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "openid",
 ]
 
-DEFAULT_GEMINI_MODEL = get_gemini_model_candidates()[0]
-llm = ChatGoogleGenerativeAI(
-    model=DEFAULT_GEMINI_MODEL,
-    google_api_key=GEMINI_API_KEY,
-    max_retries=3
-)
-system_prompt = (
-    "You are a helpful assistant for an AI calendar agent. "
-    f"The user's timezone is {CALENDAR_TIMEZONE}. Always interpret and display event times in this timezone, "
-    "never UTC unless the user explicitly requests UTC. Use the available tools to answer user requests "
-    "about calendar events, Gmail messages, calendar links, and scheduling."
+# ---------------------------------------------------------------------------
+# 2. FastAPI Application Initialization
+# ---------------------------------------------------------------------------
+app = FastAPI(
+    title="AI Calendar Agent",
+    description="Multi-user AI Calendar & Gmail Assistant powered by Gemini 2.5 Flash & FastAPI",
+    version="2.0.0",
 )
 
-if USING_MODERN_CREATE_AGENT:
-    agent_instance = create_agent(model=llm, tools=tools, system_prompt=system_prompt)
-elif MODERN_REACT_AVAILABLE:
-    try:
-        prompt = hub.pull("hwchase17/react")
-    except Exception:
-        prompt = system_prompt
-    agent_runner = create_react_agent(llm, tools, prompt)
-    agent_instance = AgentExecutor(agent=agent_runner, tools=tools, verbose=True, handle_parsing_errors=True)
-else:
-    agent_instance = None
+# CORS Middleware (Enable for all origins)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Session Middleware for secure session token storage
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    session_cookie="ai_calendar_session",
+    max_age=14 * 24 * 3600,  # 14 days
+    same_site="lax",
+    https_only=False,  # Set to True in strict HTTPS production if behind SSL
+)
 
 
-def is_quota_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return any(term in message for term in ["quota", "resource_exhausted", "429"])
+# ---------------------------------------------------------------------------
+# 3. Google OAuth 2.0 Helper Functions
+# ---------------------------------------------------------------------------
+def get_client_config() -> Dict[str, Any]:
+    """Retrieve Google OAuth Client configuration from env vars or credentials.json."""
+    client_id = GOOGLE_CLIENT_ID
+    client_secret = GOOGLE_CLIENT_SECRET
+
+    # Check if credentials.json exists as fallback
+    cred_file = BASE_DIR / "credentials.json"
+    if (not client_id or not client_secret) and cred_file.exists():
+        try:
+            with open(cred_file, "r") as f:
+                data = json.load(f)
+                conf = data.get("web") or data.get("installed")
+                if conf:
+                    return {"web": conf}
+        except Exception as e:
+            logger.warning(f"Failed to read credentials.json: {e}")
+
+    if not client_id or not client_secret:
+        raise RuntimeError(
+            "Google OAuth credentials missing! Please configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env or provide credentials.json"
+        )
+
+    return {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        }
+    }
 
 
-def clean_agent_response(response) -> str:
-    """Return only visible text from Gemini content blocks."""
-    content = getattr(response, "content", response)
-    if isinstance(content, list):
-        text_parts = []
-        for block in content:
-            if isinstance(block, dict) and block.get("text"):
-                text_parts.append(block["text"])
-            elif isinstance(block, str):
-                text_parts.append(block)
-        return "\n".join(text_parts).strip()
-    return str(content)
+def get_redirect_uri(request: Request) -> str:
+    """Dynamically determine the OAuth callback redirect URI."""
+    if RENDER_EXTERNAL_URL:
+        base = RENDER_EXTERNAL_URL.rstrip("/")
+        return f"{base}/auth/callback"
+    return str(request.url_for("auth_callback"))
 
 
-def run_calendar_without_llm(user_text: str) -> str:
-    """Handle common calendar requests when Gemini quota is unavailable."""
-    try:
-        parsed_data = parse_schedule_message(user_text, CALENDAR_TIMEZONE)
-        replies = []
-
-        for event in parsed_data.events:
-            action = event.action.upper()
-            if action == "LINK":
-                replies.append(f"📅 Google Calendar Link:\n{GOOGLE_CALENDAR_URL}")
-            elif action == "CREATE":
-                conflicts = calendar_service_module.check_calendar_conflict(
-                    event.start_time, event.end_time
-                )
-                if conflicts:
-                    replies.append(f"Conflict detected with: {', '.join(conflicts)}")
-                link = calendar_service_module.create_google_calendar_event(event)
-                replies.append(
-                    f"Event created: {event.event_name}\n"
-                    f"Time ({CALENDAR_TIMEZONE}): {event.start_time} to {event.end_time}\n"
-                    f"Calendar link: {link}"
-                )
-            elif action == "LIST":
-                events = calendar_service_module.list_google_calendar_events(
-                    event.start_time, event.end_time
-                )
-                if not events:
-                    replies.append("No events found for that date.")
-                else:
-                    replies.append("\n".join(
-                        f"{item['summary']} at {item['start']}" for item in events
-                    ))
-            elif action == "DELETE":
-                target = calendar_service_module.find_event_by_title(event.event_name)
-                if target and calendar_service_module.delete_google_calendar_event(target['id']):
-                    replies.append(f"Deleted event: {target.get('summary', event.event_name)}")
-                else:
-                    replies.append(f"Could not find event: {event.event_name}")
-            elif action == "RESCHEDULE":
-                target = calendar_service_module.find_event_by_title(event.event_name)
-                if not target:
-                    replies.append(f"Could not find event: {event.event_name}")
-                else:
-                    link = calendar_service_module.reschedule_google_calendar_event(
-                        target['id'], event.start_time, event.end_time
-                    )
-                    replies.append(f"Event rescheduled: {event.event_name}\nCalendar link: {link}")
-
-        return "\n\n".join(replies)
-    except Exception as exc:
-        if "missing credentials" in str(exc).lower() or "credentials" in str(exc).lower():
-            return "Calendar is not authenticated on Render. Set GOOGLE_TOKEN_BASE64 using your token.json contents, then redeploy."
-        return f"Gemini quota is exhausted, and the Calendar fallback failed: {exc}"
-
-
-def run_agent(user_text: str) -> str:
-    cleaned_input = user_text.strip() if user_text else ""
-    if not cleaned_input:
-        return "Please enter a valid request or message."
+def get_user_credentials(request: Request) -> Optional[Credentials]:
+    """
+    Dynamically deserialize and refresh the active user's Google OAuth Credentials
+    from Starlette session.
+    """
+    creds_data = request.session.get("user_creds")
+    if not creds_data:
+        return None
 
     try:
-        if agent_instance is None:
-            response = llm.invoke(
-                f"{system_prompt}\n\nUser request: {cleaned_input}\n"
-                "Respond clearly. If the request requires a calendar or Gmail action, explain the requested action."
+        creds = Credentials(
+            token=creds_data.get("token"),
+            refresh_token=creds_data.get("refresh_token"),
+            token_uri=creds_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+            client_id=creds_data.get("client_id"),
+            client_secret=creds_data.get("client_secret"),
+            scopes=creds_data.get("scopes", SCOPES),
+        )
+
+        # Automatically refresh expired access tokens
+        if creds.expired and creds.refresh_token:
+            logger.info("Access token expired. Refreshing token with Google OAuth...")
+            creds.refresh(GoogleRequest())
+            # Update refreshed token in active session
+            request.session["user_creds"] = {
+                "token": creds.token,
+                "refresh_token": creds.refresh_token,
+                "token_uri": creds.token_uri,
+                "client_id": creds.client_id,
+                "client_secret": creds.client_secret,
+                "scopes": creds.scopes,
+            }
+
+        return creds
+    except Exception as e:
+        logger.error(f"Failed to load or refresh user credentials: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 4. Dynamic Multi-User Google Tool Functions
+# ---------------------------------------------------------------------------
+def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_results: int = 15) -> str:
+    """
+    Lists upcoming events from the user's primary Google Calendar.
+    time_min: Start ISO string (defaults to current UTC time).
+    """
+    try:
+        service = build("calendar", "v3", credentials=creds)
+        if not time_min:
+            time_min = datetime.now(timezone.utc).isoformat()
+
+        events_result = (
+            service.events()
+            .list(
+                calendarId="primary",
+                timeMin=time_min,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime",
             )
-            return clean_agent_response(response)
-        if USING_MODERN_CREATE_AGENT:
-            res = agent_instance.invoke({"messages": [HumanMessage(content=cleaned_input)]})
-            if isinstance(res, dict) and "messages" in res and res["messages"]:
-                return clean_agent_response(res["messages"][-1])
-            return clean_agent_response(res)
-        else:
-            res = agent_instance.invoke({"input": cleaned_input})
-            if isinstance(res, dict):
-                return clean_agent_response(res.get("output", ""))
-            return clean_agent_response(res)
-    except Exception as exc:
-        if is_quota_error(exc):
-            return run_calendar_without_llm(cleaned_input)
-        return f"Error processing request: {exc}"
+            .execute()
+        )
+        events = events_result.get("items", [])
+
+        if not events:
+            return "No upcoming events found on your Google Calendar."
+
+        formatted_events = []
+        for ev in events:
+            start = ev["start"].get("dateTime", ev["start"].get("date"))
+            end = ev["end"].get("dateTime", ev["end"].get("date"))
+            summary = ev.get("summary", "(No title)")
+            location = ev.get("location", "No location specified")
+            event_id = ev.get("id", "")
+            link = ev.get("htmlLink", "")
+
+            formatted_events.append({
+                "id": event_id,
+                "summary": summary,
+                "start": start,
+                "end": end,
+                "location": location,
+                "link": link,
+            })
+
+        return json.dumps(formatted_events, indent=2)
+
+    except HttpError as err:
+        logger.error(f"Google Calendar API Error: {err}")
+        return f"Error querying calendar: {err}"
+    except Exception as e:
+        logger.error(f"Unexpected error in list_events: {e}")
+        return f"Failed to fetch calendar events: {str(e)}"
 
 
-# ---------------------------------------------------------
-# ⏰ BACKGROUND SCHEDULER TASKS
-# ---------------------------------------------------------
-
-def send_telegram_message(chat_id: str, text: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": text})
-
-
-async def check_upcoming_reminders():
-    """Checks for events starting in the next 15 minutes and sends an alert."""
-    if not TELEGRAM_CHAT_ID or calendar_service is None:
-        return
-    
-    now = datetime.datetime.now(datetime.timezone.utc)
-    in_15_mins = now + datetime.timedelta(minutes=15)
-    
-    events_result = calendar_service.events().list(
-        calendarId='primary',
-        timeMin=now.isoformat().replace('+00:00', 'Z'),
-        timeMax=in_15_mins.isoformat().replace('+00:00', 'Z'),
-        singleEvents=True
-    ).execute()
-    
-    for event in events_result.get('items', []):
-        summary = event.get('summary', 'Upcoming Event')
-        start = event['start'].get('dateTime', 'soon')
-        send_telegram_message(TELEGRAM_CHAT_ID, f"⏰ REMINDER: '{summary}' starts in 15 minutes ({start})!")
-
-
-async def auto_scan_tea_invites():
-    """Checks Gmail every 15 minutes for Drive or internship messages."""
-    if not TELEGRAM_CHAT_ID:
-        return
+def create_event_tool(
+    creds: Credentials,
+    summary: str,
+    start_time: str,
+    end_time: str,
+    description: str = "",
+    location: str = "",
+    attendees: Optional[List[str]] = None,
+) -> str:
+    """
+    Creates a new event on the user's primary Google Calendar after performing conflict checking.
+    start_time and end_time must be ISO 8601 strings (e.g. '2026-08-30T10:00:00Z' or '2026-08-30T10:00:00+05:30').
+    """
     try:
-        messages = calendar_service_module.find_gmail_drive_or_internship_messages()
-    except Exception as exc:
-        send_telegram_message(TELEGRAM_CHAT_ID, f"❌ Could not read Gmail: {exc}")
-        return
+        service = build("calendar", "v3", credentials=creds)
 
-    if not messages:
-        return
+        # 1. Conflict checking: check for any overlapping events in this window
+        conflict_msg = ""
+        try:
+            overlap_check = (
+                service.events()
+                .list(
+                    calendarId="primary",
+                    timeMin=start_time,
+                    timeMax=end_time,
+                    singleEvents=True,
+                )
+                .execute()
+            )
+            conflicts = overlap_check.get("items", [])
+            if conflicts:
+                conflict_names = [f"'{c.get('summary', 'Untitled')}'" for c in conflicts]
+                conflict_msg = f"⚠️ Notice: You have overlapping event(s) during this time: {', '.join(conflict_names)}."
+        except Exception as check_err:
+            logger.warning(f"Conflict check warning: {check_err}")
 
-    PENDING_GMAIL_EVENTS[TELEGRAM_CHAT_ID] = []
-    lines = ["📧 **New Drive/internship message detected in Gmail:**"]
-    for message in messages:
-        email_text = f"{message['subject']}\n{message['snippet']}"
-        parsed_email = parse_schedule_message(email_text, CALENDAR_TIMEZONE)
-        PENDING_GMAIL_EVENTS[TELEGRAM_CHAT_ID].extend(parsed_email.events)
-        lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['display_snippet']}")
-    lines.append("\nReply 'approve' after reviewing it to add it to the calendar.")
-    send_telegram_message(TELEGRAM_CHAT_ID, "\n".join(lines))
+        # 2. Prepare event payload
+        event_body: Dict[str, Any] = {
+            "summary": summary,
+            "description": description or f"Scheduled via AI Calendar Agent",
+            "start": {"dateTime": start_time},
+            "end": {"dateTime": end_time},
+        }
+
+        if location:
+            event_body["location"] = location
+
+        if attendees:
+            event_body["attendees"] = [{"email": email.strip()} for email in attendees if email.strip()]
+
+        created_event = service.events().insert(calendarId="primary", body=event_body).execute()
+
+        result = {
+            "status": "success",
+            "message": f"Successfully created event: '{summary}'",
+            "event_id": created_event.get("id"),
+            "htmlLink": created_event.get("htmlLink"),
+            "start": start_time,
+            "end": end_time,
+            "location": location,
+            "conflict_warning": conflict_msg if conflict_msg else None,
+        }
+        return json.dumps(result, indent=2)
+
+    except HttpError as err:
+        logger.error(f"Google Calendar Insert Error: {err}")
+        return f"Error creating calendar event: {err}"
+    except Exception as e:
+        logger.error(f"Unexpected error in create_event: {e}")
+        return f"Failed to create event: {str(e)}"
 
 
-async def send_daily_briefing():
-    """Sends a morning schedule summary at 8:00 AM."""
-    if not TELEGRAM_CHAT_ID:
-        return
-    
-    events_summary = list_events()
-    briefing_text = f"🌅 Good morning! Here is your agenda for today:\n\n{events_summary}"
-    send_telegram_message(TELEGRAM_CHAT_ID, briefing_text)
+def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
+    """
+    Searches unread emails for meeting, tea, coffee, or meetup invitations
+    using the query 'is:unread (tea OR coffee OR meetup OR meeting OR sync OR invite)'.
+    """
+    try:
+        service = build("gmail", "v1", credentials=creds)
+        query = "is:unread (tea OR coffee OR meetup OR meeting OR sync OR invite)"
+
+        response = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
+        messages = response.get("messages", [])
+
+        if not messages:
+            return "No unread invitation emails (tea, coffee, meetup, or meetings) found in your Gmail inbox."
+
+        invitations = []
+        for msg in messages:
+            msg_id = msg["id"]
+            msg_data = service.users().messages().get(userId="me", id=msg_id, format="metadata",
+                                                     metadataHeaders=["Subject", "From", "Date"]).execute()
+
+            headers = {h["name"]: h["value"] for h in msg_data.get("payload", {}).get("headers", [])}
+            subject = headers.get("Subject", "(No Subject)")
+            sender = headers.get("From", "Unknown Sender")
+            date_str = headers.get("Date", "")
+            snippet = msg_data.get("snippet", "")
+
+            invitations.append({
+                "message_id": msg_id,
+                "subject": subject,
+                "sender": sender,
+                "date": date_str,
+                "snippet": snippet,
+            })
+
+        return json.dumps(invitations, indent=2)
+
+    except HttpError as err:
+        logger.error(f"Gmail API Error: {err}")
+        return f"Error querying Gmail: {err}"
+    except Exception as e:
+        logger.error(f"Unexpected error in check_gmail_invites: {e}")
+        return f"Failed to search Gmail invites: {str(e)}"
 
 
-# ---------------------------------------------------------
-# 💬 TELEGRAM WEBHOOK ROUTE
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 5. Google OAuth 2.0 Web Endpoints
+# ---------------------------------------------------------------------------
+@app.get("/login", response_class=RedirectResponse)
+async def login(request: Request):
+    """Initiates Google OAuth 2.0 authorization flow."""
+    try:
+        client_config = get_client_config()
+        redirect_uri = get_redirect_uri(request)
 
-@app.post("/webhook/telegram")
-async def telegram_webhook(request: Request):
-    global TELEGRAM_CHAT_ID
-    data = await request.json()
-    
-    if "message" in data and "text" in data["message"]:
-        chat_id = str(data["message"]["chat"]["id"])
-        user_text = data["message"]["text"].strip()
+        flow = Flow.from_client_config(
+            client_config=client_config,
+            scopes=SCOPES,
+            redirect_uri=redirect_uri,
+        )
 
-        # Security Check
-        if ALLOWED_CHAT_ID and chat_id != str(ALLOWED_CHAT_ID):
-            print(f"Unauthorized access blocked from Chat ID: {chat_id}")
-            return {"status": "unauthorized"}
-        
-        TELEGRAM_CHAT_ID = chat_id
+        authorization_url, state = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",  # Ensures refresh_token is always returned
+        )
 
-        normalized_text = user_text.lower()
+        request.session["oauth_state"] = state
+        return RedirectResponse(url=authorization_url)
 
-        # Check for calendar link requests
-        link_triggers = ["link", "/link", "/calendar", "calendar link", "google calendar link", "calender link", "calendar url", "open calendar", "show calendar", "give me calendar link", "where is my calendar", "my calendar link"]
-        if normalized_text in {"link", "calendar link", "calender link", "calender", "calendar", "/link", "/calendar"} or any(phrase in normalized_text for phrase in link_triggers):
-            if not any(sched_word in normalized_text for sched_word in [" at ", "tomorrow", "today", " pm", " am", "schedule", "delete", "cancel", "reschedule", "move "]):
-                send_telegram_message(chat_id, f"📅 **Your Google Calendar Link:**\n\n🔗 {GOOGLE_CALENDAR_URL}")
-                return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Login initiation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate Google OAuth: {str(e)}",
+        )
 
-        if normalized_text in {"approve", "approved", "yes", "add it", "add to calendar"} or normalized_text.startswith("approve "):
-            pending_events = PENDING_GMAIL_EVENTS.pop(chat_id, None)
-            if not pending_events:
-                try:
-                    messages = calendar_service_module.find_gmail_drive_or_internship_messages()
-                    pending_events = []
-                    for message in messages:
-                        email_text = f"{message['subject']}\n{message['snippet']}"
-                        pending_events.extend(parse_schedule_message(email_text, CALENDAR_TIMEZONE).events)
-                except Exception as exc:
-                    send_telegram_message(chat_id, f"❌ Could not recover the Gmail event: {exc}")
-                    return {"status": "ok"}
-            if not pending_events:
-                send_telegram_message(chat_id, "There is no unread Gmail event waiting for approval.")
-                return {"status": "ok"}
-            links = [calendar_service_module.create_google_calendar_event(event) for event in pending_events]
-            send_telegram_message(chat_id, "✅ Added the approved Gmail event(s) to Google Calendar.\n" + "\n".join(link for link in links if link))
-            return {"status": "ok"}
 
-        if any(word in normalized_text for word in ["gmail", "email", "drive", "internship"]):
+@app.get("/auth/callback", name="auth_callback")
+async def auth_callback(request: Request):
+    """Handles OAuth 2.0 callback, exchanges code for credentials, and stores in session."""
+    state = request.session.get("oauth_state")
+    code = request.query_params.get("code")
+
+    if not code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing authorization code from Google.")
+
+    try:
+        client_config = get_client_config()
+        redirect_uri = get_redirect_uri(request)
+
+        flow = Flow.from_client_config(
+            client_config=client_config,
+            scopes=SCOPES,
+            state=state,
+            redirect_uri=redirect_uri,
+        )
+
+        # Exchange authorization code for tokens
+        flow.fetch_token(authorization_response=str(request.url))
+        credentials = flow.credentials
+
+        # Fetch authenticated user profile details
+        userinfo_service = build("oauth2", "v2", credentials=credentials)
+        user_info = userinfo_service.userinfo().get().execute()
+
+        email = user_info.get("email", "")
+        name = user_info.get("name", email)
+        picture = user_info.get("picture", "")
+
+        # Store credentials and user profile securely in session
+        request.session["user_email"] = email
+        request.session["user_name"] = name
+        request.session["user_picture"] = picture
+        request.session["user_creds"] = {
+            "token": credentials.token,
+            "refresh_token": credentials.refresh_token,
+            "token_uri": credentials.token_uri,
+            "client_id": credentials.client_id,
+            "client_secret": credentials.client_secret,
+            "scopes": credentials.scopes,
+        }
+
+        logger.info(f"User '{email}' successfully signed in via Google OAuth.")
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    except Exception as e:
+        logger.error(f"OAuth token exchange failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to authenticate with Google: {str(e)}",
+        )
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    """Clears user session and logs out."""
+    user_email = request.session.get("user_email")
+    request.session.clear()
+    if user_email:
+        logger.info(f"User '{user_email}' logged out.")
+    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/api/me")
+async def get_current_user(request: Request):
+    """Returns current user profile and authentication status."""
+    user_creds = request.session.get("user_creds")
+    if not user_creds:
+        return JSONResponse({"authenticated": False})
+
+    return JSONResponse({
+        "authenticated": True,
+        "email": request.session.get("user_email", ""),
+        "name": request.session.get("user_name", "User"),
+        "picture": request.session.get("user_picture", ""),
+    })
+
+
+# ---------------------------------------------------------------------------
+# 6. AI Agent Runner & LangChain Integration
+# ---------------------------------------------------------------------------
+class ChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/chat")
+async def chat_endpoint(request: Request, body: ChatRequest):
+    """
+    AI Chatbot endpoint:
+    - Validates user authentication.
+    - Dynamically binds user Google Calendar and Gmail tools.
+    - Runs Gemini 2.5 Flash with tool calling support.
+    """
+    user_creds = get_user_credentials(request)
+    if not user_creds:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized. Please sign in with your Google Account first.",
+        )
+
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GEMINI_API_KEY is not configured on the server.",
+        )
+
+    user_message = body.message.strip()
+    if not user_message:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message cannot be empty.")
+
+    try:
+        user_email = request.session.get("user_email", "User")
+        now_dt = datetime.now(timezone.utc).astimezone()
+        current_time_str = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+        current_iso_str = now_dt.isoformat()
+
+        # 1. Dynamically define tools with active user credentials injected
+        def list_events_wrapper(time_min: Optional[str] = None, max_results: int = 10) -> str:
+            """Query upcoming Google Calendar events."""
+            return list_events_tool(user_creds, time_min=time_min, max_results=max_results)
+
+        def create_event_wrapper(
+            summary: str,
+            start_time: str,
+            end_time: str,
+            description: str = "",
+            location: str = "",
+            attendees: Optional[List[str]] = None,
+        ) -> str:
+            """Create a new Google Calendar event with conflict check."""
+            return create_event_tool(
+                user_creds,
+                summary=summary,
+                start_time=start_time,
+                end_time=end_time,
+                description=description,
+                location=location,
+                attendees=attendees,
+            )
+
+        def check_gmail_invites_wrapper(max_results: int = 10) -> str:
+            """Scan unread Gmail messages for meeting, coffee, or tea invites."""
+            return check_gmail_invites_tool(user_creds, max_results=max_results)
+
+        tools = [
+            StructuredTool.from_function(
+                func=list_events_wrapper,
+                name="list_events",
+                description="List upcoming events from the user's primary Google Calendar. time_min is optional ISO string.",
+            ),
+            StructuredTool.from_function(
+                func=create_event_wrapper,
+                name="create_event",
+                description="Create a new event on Google Calendar with conflict checking. start_time and end_time must be ISO 8601 format.",
+            ),
+            StructuredTool.from_function(
+                func=check_gmail_invites_wrapper,
+                name="check_gmail_invites",
+                description="Scan unread emails for tea, coffee, meetup, or meeting invitations in Gmail.",
+            ),
+        ]
+
+        tool_map = {t.name: t for t in tools}
+
+        # 2. System Instructions
+        system_prompt = (
+            "You are 'AI Calendar Agent', an expert, helpful, and friendly scheduling assistant.\n"
+            f"Active User: {user_email}\n"
+            f"Current DateTime: {current_time_str} (ISO: {current_iso_str})\n"
+            f"Default Timezone: {CALENDAR_TIMEZONE}\n\n"
+            "Instructions:\n"
+            "1. You have dynamic access to the user's Google Calendar and Gmail tools.\n"
+            "2. When the user asks about their schedule, events, or availability, call `list_events`.\n"
+            "3. When creating an event, parse dates and times relative to Current DateTime, calculate proper ISO start and end times, and call `create_event`. Always inform the user if there are any conflicting events.\n"
+            "4. When the user asks about emails, tea, coffee, or meeting invitations, call `check_gmail_invites` and summarize relevant findings with clear options to schedule them.\n"
+            "5. Format output using clean Markdown, bullet points, and nice styling. Include clickable links if available."
+        )
+
+        # 3. Initialize Gemini LLM with bound tools
+        # We use gemini-2.5-flash as default, with fallback candidates if needed
+        model_candidates = [
+            os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+        ]
+
+        llm = None
+        last_error = None
+        for candidate in model_candidates:
             try:
-                messages = calendar_service_module.find_gmail_drive_or_internship_messages()
-            except Exception as exc:
-                send_telegram_message(chat_id, f"❌ Could not read Gmail: {exc}")
-                return {"status": "ok"}
-            if not messages:
-                send_telegram_message(chat_id, "No unread Drive or internship messages found in Gmail.")
-                return {"status": "ok"}
+                llm = ChatGoogleGenerativeAI(
+                    model=candidate,
+                    google_api_key=GEMINI_API_KEY,
+                    temperature=0.2,
+                )
+                break
+            except Exception as model_err:
+                last_error = model_err
 
-            PENDING_GMAIL_EVENTS[chat_id] = []
-            lines = ["📧 Gmail messages found (Drive/internship):"]
-            for message in messages:
-                email_text = f"{message['subject']}\n{message['snippet']}"
-                parsed_email = parse_schedule_message(email_text, CALENDAR_TIMEZONE)
-                PENDING_GMAIL_EVENTS[chat_id].extend(parsed_email.events)
-                lines.append(f"\nSubject: {message['subject']}\nFrom: {message['from']}\nMessage: {message['display_snippet']}")
-            lines.append("\nReply 'approve' to add these detected event(s) to your calendar.")
-            send_telegram_message(chat_id, "\n".join(lines))
-            return {"status": "ok"}
+        if not llm:
+            raise RuntimeError(f"Could not initialize Gemini model: {last_error}")
 
-        # Welcome Response
-        if user_text.lower() in ["/start", "/help", "hi", "hello"]:
-            welcome_text = (
-                "👋 **Welcome to your AI Calendar Assistant!**\n\n"
-                "• 📅 View schedule: *'What is on my schedule today?'*\n"
-                "• ➕ Add event: *'Schedule tea tomorrow at 4 PM'*\n"
-                "• 🔗 Calendar link: *'Send calendar link'* or /link\n"
-                "• ☕ Scan Gmail: *'Check my emails for tea invites'*\n"
-                "• 🗑️ Delete event: *'Delete event [Event ID]'"
-            )
-            send_telegram_message(chat_id, welcome_text)
-            return {"status": "ok"}
-        
-        # Process request through Gemini Agent
-        response = run_agent(user_text)
-        send_telegram_message(chat_id, response)
-        
-    return {"status": "ok"}
+        llm_with_tools = llm.bind_tools(tools)
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ]
+
+        # 4. Multi-turn Agent Execution Loop
+        max_iterations = 6
+        final_text = ""
+
+        for _ in range(max_iterations):
+            response = await llm_with_tools.ainvoke(messages)
+            messages.append(response)
+
+            if not response.tool_calls:
+                final_text = response.content
+                break
+
+            # Execute tool calls
+            for tool_call in response.tool_calls:
+                tool_name = tool_call["name"]
+                tool_args = tool_call["args"]
+                tool_id = tool_call.get("id", tool_name)
+
+                logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
+
+                if tool_name in tool_map:
+                    try:
+                        tool_func = tool_map[tool_name]
+                        tool_result = tool_func.invoke(tool_args)
+                    except Exception as tool_exec_err:
+                        logger.error(f"Error running tool {tool_name}: {tool_exec_err}")
+                        tool_result = f"Error executing {tool_name}: {str(tool_exec_err)}"
+                else:
+                    tool_result = f"Tool '{tool_name}' not found."
+
+                messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
+
+        if not final_text:
+            final_text = "I processed your request. Let me know if you need anything else with your schedule or emails!"
+
+        return JSONResponse({"response": final_text})
+
+    except Exception as e:
+        logger.error(f"Chat execution failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": f"An error occurred while processing your request: {str(e)}"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# 7. Frontend UI Route
+# ---------------------------------------------------------------------------
+@app.get("/", response_class=HTMLResponse)
+async def serve_ui(request: Request):
+    """Serves the ChatGPT-style modern web interface."""
+    template_file = TEMPLATES_DIR / "index.html"
+    if template_file.exists():
+        with open(template_file, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    elif templates:
+        return templates.TemplateResponse("index.html", {"request": request})
+    else:
+        return HTMLResponse(
+            content="<h1>AI Calendar Agent</h1><p>Frontend template not found. Please ensure templates/index.html exists.</p>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 8. Server Runner
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    host = os.getenv("HOST", "0.0.0.0")
+    logger.info(f"Starting AI Calendar Agent on http://{host}:{port}")
+    uvicorn.run("main:app", host=host, port=port, reload=True)

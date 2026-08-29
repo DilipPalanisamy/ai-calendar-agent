@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Calendar Agent - Smart Calendar & Gmail Assistant</title>
+    <meta name="description" content="AI Calendar Agent powered by Gemini 2.5 Flash, Google Calendar, and Gmail. Manage your schedule seamlessly with natural language.">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Marked.js & DOMPurify for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+        :root {
+            --bg-primary: #0b0f17;
+            --bg-secondary: #111827;
+            --bg-tertiary: #1f2937;
+            --bg-card: rgba(17, 24, 39, 0.75);
+            --bg-card-hover: rgba(31, 41, 55, 0.85);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.16);
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-primary: #6366f1;
+            --accent-primary-hover: #4f46e5;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+            --accent-glow: rgba(99, 102, 241, 0.25);
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --sidebar-width: 280px;
+            --radius-lg: 16px;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* App Container */
+        .app-layout {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: var(--sidebar-width);
+            background-color: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1.25rem;
+            z-index: 40;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding-bottom: 1.25rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .brand-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-md);
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            box-shadow: 0 4px 12px var(--accent-glow);
+            color: white;
+        }
+
+        .brand-info h1 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        .brand-info p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .sidebar-section {
+            margin-top: 1.25rem;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .section-title {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+
+        .quick-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .quick-action-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.7rem 0.85rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+            font-weight: 500;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(8px);
+        }
+
+        .quick-action-btn:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+            transform: translateY(-1px);
+        }
+
+        .quick-action-btn i {
+            color: var(--accent-primary);
+            font-size: 0.9rem;
+            width: 16px;
+            text-align: center;
+        }
+
+        /* Model Badge / Info Card */
+        .system-pill {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: var(--radius-md);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .system-pill-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.35rem;
+            font-weight: 600;
+            color: #a5b4fc;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--success-color);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success-color);
+            display: inline-block;
+        }
+
+        .pulse-dot.offline {
+            background-color: var(--warning-color);
+            box-shadow: 0 0 8px var(--warning-color);
+        }
+
+        /* User Profile Footer */
+        .sidebar-footer {
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .user-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+        }
+
+        .user-details {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            overflow: hidden;
+        }
+
+        .user-avatar {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: white;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .user-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .user-text {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .user-name {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-email {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .btn-icon {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 0.4rem;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s;
+        }
+
+        .btn-icon:hover {
+            color: var(--danger-color);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .btn-google-login {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: white;
+            color: #1f2937;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-weight: 600;
+            font-size: 0.85rem;
+            border-radius: var(--radius-md);
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-google-login:hover {
+            background: #f3f4f6;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15);
+        }
+
+        /* Main Chat Area */
+        .main-chat {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            background-color: var(--bg-primary);
+            position: relative;
+        }
+
+        /* Top Navigation Header */
+        .chat-header {
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(11, 15, 23, 0.8);
+            backdrop-filter: blur(12px);
+            z-index: 20;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 1.25rem;
+            cursor: pointer;
+        }
+
+        .model-chip {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 0.4rem 0.8rem;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .model-chip i {
+            color: #8b5cf6;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .btn-header {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.45rem 0.85rem;
+            border-radius: var(--radius-md);
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            transition: all 0.2s;
+        }
+
+        .btn-header:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
+
+        /* Chat Messages Container */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            max-width: 900px;
+            width: 100%;
+            margin: 0 auto;
+            scroll-behavior: smooth;
+        }
+
+        /* Empty / Welcome State */
+        .welcome-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: auto;
+            text-align: center;
+            max-width: 650px;
+            padding: 2rem 1rem;
+        }
+
+        .welcome-badge {
+            width: 64px;
+            height: 64px;
+            border-radius: 20px;
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: white;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 8px 24px var(--accent-glow);
+            animation: float 4s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-6px); }
+        }
+
+        .welcome-title {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .welcome-subtitle {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 2rem;
+        }
+
+        .starter-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.85rem;
+            width: 100%;
+        }
+
+        .starter-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(8px);
+        }
+
+        .starter-card:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--accent-primary);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+
+        .starter-card-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .starter-card-title i {
+            color: var(--accent-primary);
+        }
+
+        .starter-card-desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        /* Message Bubbles */
+        .message-row {
+            display: flex;
+            gap: 1rem;
+            width: 100%;
+            animation: fadeIn 0.3s ease forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message-row.user {
+            justify-content: flex-end;
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.95rem;
+            flex-shrink: 0;
+            color: white;
+        }
+
+        .message-avatar.assistant {
+            background: var(--accent-gradient);
+            box-shadow: 0 4px 12px var(--accent-glow);
+        }
+
+        .message-avatar.user {
+            background: #374151;
+        }
+
+        .message-body {
+            max-width: 80%;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .message-row.user .message-body {
+            align-items: flex-end;
+        }
+
+        .message-content {
+            padding: 0.95rem 1.15rem;
+            border-radius: var(--radius-lg);
+            font-size: 0.92rem;
+            line-height: 1.6;
+            word-break: break-word;
+        }
+
+        .message-row.user .message-content {
+            background: #4f46e5;
+            color: #ffffff;
+            border-bottom-right-radius: 4px;
+            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3);
+        }
+
+        .message-row.assistant .message-content {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-bottom-left-radius: 4px;
+        }
+
+        /* Markdown Styles inside message-content */
+        .message-content p {
+            margin-bottom: 0.65rem;
+        }
+
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message-content ul, .message-content ol {
+            margin-left: 1.4rem;
+            margin-bottom: 0.65rem;
+        }
+
+        .message-content li {
+            margin-bottom: 0.3rem;
+        }
+
+        .message-content code {
+            font-family: 'JetBrains Mono', monospace;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 0.15rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #f472b6;
+        }
+
+        .message-content pre {
+            background: #090d14;
+            border: 1px solid var(--border-color);
+            padding: 0.85rem;
+            border-radius: var(--radius-md);
+            overflow-x: auto;
+            margin-bottom: 0.65rem;
+        }
+
+        .message-content pre code {
+            background: none;
+            padding: 0;
+            color: #e2e8f0;
+        }
+
+        .message-content a {
+            color: #818cf8;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+
+        .message-content a:hover {
+            color: #a5b4fc;
+        }
+
+        .message-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 0.65rem;
+            font-size: 0.85rem;
+        }
+
+        .message-content th, .message-content td {
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+        }
+
+        .message-content th {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-primary);
+        }
+
+        .message-time {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin: 0 0.25rem;
+        }
+
+        /* Event Card inside Bot Messages */
+        .event-card {
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            border-radius: var(--radius-md);
+            padding: 0.85rem;
+            margin: 0.5rem 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .event-card-title {
+            font-weight: 600;
+            color: #c7d2fe;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .event-meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .event-meta span {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        /* Thinking / Loading Indicator */
+        .thinking-bubble {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.85rem 1.15rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            border-bottom-left-radius: 4px;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            width: fit-content;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dots span {
+            width: 6px;
+            height: 6px;
+            background: var(--accent-primary);
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Input Area Container */
+        .chat-input-wrapper {
+            padding: 1rem 1.5rem 1.5rem;
+            background: linear-gradient(180deg, rgba(11, 15, 23, 0) 0%, rgba(11, 15, 23, 0.9) 30%, var(--bg-primary) 100%);
+            position: relative;
+            z-index: 10;
+        }
+
+        .chat-input-container {
+            max-width: 900px;
+            margin: 0 auto;
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 0.5rem 0.75rem 0.5rem 1.25rem;
+            display: flex;
+            align-items: flex-end;
+            gap: 0.75rem;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .chat-input-container:focus-within {
+            border-color: rgba(99, 102, 241, 0.6);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2), 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .chat-textarea {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            resize: none;
+            max-height: 160px;
+            min-height: 24px;
+            padding: 0.5rem 0;
+        }
+
+        .chat-textarea::placeholder {
+            color: var(--text-muted);
+        }
+
+        .btn-send {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: var(--accent-gradient);
+            border: none;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            margin-bottom: 2px;
+        }
+
+        .btn-send:hover:not(:disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px var(--accent-glow);
+        }
+
+        .btn-send:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: #374151;
+        }
+
+        .input-hint {
+            text-align: center;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+
+        /* Unauthenticated Overlay */
+        .auth-banner-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(17, 24, 39, 0.88);
+            backdrop-filter: blur(6px);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1.25rem;
+            z-index: 15;
+        }
+
+        .auth-banner-text {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .auth-banner-text i {
+            color: #818cf8;
+            font-size: 1.1rem;
+        }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .toast {
+            padding: 0.75rem 1.25rem;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: white;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            animation: slideInRight 0.3s ease;
+        }
+
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .toast.success { border-left: 4px solid var(--success-color); }
+        .toast.error { border-left: 4px solid var(--danger-color); }
+        .toast.info { border-left: 4px solid var(--accent-primary); }
+
+        /* Responsive Mobile Styles */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                transform: translateX(-100%);
+                box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .mobile-menu-btn {
+                display: block;
+            }
+
+            .starter-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .chat-messages {
+                padding: 1rem;
+            }
+
+            .message-body {
+                max-width: 90%;
+            }
+
+            .auth-banner-overlay {
+                flex-direction: column;
+                gap: 0.5rem;
+                text-align: center;
+                padding: 0.85rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div>
+                <div class="sidebar-brand">
+                    <div class="brand-icon">
+                        <i class="fa-solid fa-calendar-check"></i>
+                    </div>
+                    <div class="brand-info">
+                        <h1>AI Calendar Agent</h1>
+                        <p>Google Calendar & Gmail AI</p>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <div class="section-title">Quick Actions</div>
+                    <div class="quick-actions">
+                        <button class="quick-action-btn" onclick="sendQuickPrompt('What are my upcoming events for today and this week?')">
+                            <i class="fa-solid fa-calendar-day"></i>
+                            <span>Today's & Weekly Schedule</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="sendQuickPrompt('Check my unread Gmail for any meeting, tea, or coffee invitations.')">
+                            <i class="fa-solid fa-envelope-open-text"></i>
+                            <span>Scan Gmail for Invites</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="sendQuickPrompt('Schedule a 30-minute Coffee Chat tomorrow at 4:00 PM with Dilip.')">
+                            <i class="fa-solid fa-mug-hot"></i>
+                            <span>Quick Coffee Chat</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="sendQuickPrompt('Do I have any scheduling conflicts tomorrow afternoon?')">
+                            <i class="fa-solid fa-shield-halved"></i>
+                            <span>Check Conflicts</span>
+                        </button>
+                    </div>
+
+                    <!-- System Status Card -->
+                    <div class="system-pill">
+                        <div class="system-pill-header">
+                            <span><i class="fa-solid fa-bolt"></i> Gemini 2.5 Flash</span>
+                            <span class="pulse-dot" id="system-status-dot"></span>
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);" id="system-status-text">
+                            Connected & Ready
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Profile / Auth Footer -->
+            <div class="sidebar-footer">
+                <div id="auth-container">
+                    <!-- Dynamic rendering: logged in vs logged out -->
+                    <div style="text-align: center; padding: 0.5rem;">
+                        <span style="font-size: 0.75rem; color: var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Checking authentication...</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="main-chat">
+            <!-- Header Bar -->
+            <header class="chat-header">
+                <div class="header-left">
+                    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleSidebar()">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <div class="model-chip">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>AI Assistant</span>
+                    </div>
+                </div>
+
+                <div class="header-actions">
+                    <button class="btn-header" onclick="clearChat()">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>New Chat</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Chat Stream / Messages -->
+            <div class="chat-messages" id="chat-messages">
+                <!-- Welcome Screen (Default) -->
+                <div class="welcome-container" id="welcome-screen">
+                    <div class="welcome-badge">
+                        <i class="fa-solid fa-sparkles"></i>
+                    </div>
+                    <h2 class="welcome-title">How can I assist your schedule today?</h2>
+                    <p class="welcome-subtitle">
+                        I am your AI Calendar & Gmail Agent. Ask me to check your agenda, scan emails for meeting invitations, schedule events, or resolve calendar conflicts.
+                    </p>
+
+                    <div class="starter-grid">
+                        <div class="starter-card" onclick="sendQuickPrompt('What are my upcoming events for today and this week?')">
+                            <div class="starter-card-title">
+                                <i class="fa-solid fa-calendar"></i>
+                                <span>Check Schedule</span>
+                            </div>
+                            <div class="starter-card-desc">List all events and meetings coming up on your calendar.</div>
+                        </div>
+
+                        <div class="starter-card" onclick="sendQuickPrompt('Scan my Gmail for unread meeting, tea, or coffee invites.')">
+                            <div class="starter-card-title">
+                                <i class="fa-solid fa-inbox"></i>
+                                <span>Find Unread Invites</span>
+                            </div>
+                            <div class="starter-card-desc">Search recent emails for coffee, meetup, or sync requests.</div>
+                        </div>
+
+                        <div class="starter-card" onclick="sendQuickPrompt('Schedule a Team Sync for tomorrow from 10:00 AM to 11:00 AM.')">
+                            <div class="starter-card-title">
+                                <i class="fa-solid fa-clock"></i>
+                                <span>Schedule Meeting</span>
+                            </div>
+                            <div class="starter-card-desc">Create events automatically with conflict checks.</div>
+                        </div>
+
+                        <div class="starter-card" onclick="sendQuickPrompt('What free time slots do I have tomorrow afternoon?')">
+                            <div class="starter-card-title">
+                                <i class="fa-solid fa-hourglass-half"></i>
+                                <span>Find Free Time</span>
+                            </div>
+                            <div class="starter-card-desc">Discover available gaps in your busy schedule.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Box Section -->
+            <div class="chat-input-wrapper">
+                <div class="chat-input-container">
+                    <textarea 
+                        id="chat-input" 
+                        class="chat-textarea" 
+                        placeholder="Ask anything about your schedule, invites, or create an event..."
+                        rows="1"
+                        onkeydown="handleKeyDown(event)"
+                        oninput="autoResize(this)"
+                    ></textarea>
+                    <button id="send-btn" class="btn-send" onclick="sendMessage()">
+                        <i class="fa-solid fa-arrow-up"></i>
+                    </button>
+
+                    <!-- Unauthenticated Overlay (Displayed when user is not signed in) -->
+                    <div id="auth-overlay" class="auth-banner-overlay" style="display: none;">
+                        <div class="auth-banner-text">
+                            <i class="fa-solid fa-lock"></i>
+                            <span>Sign in with Google to enable your Calendar & Gmail Agent</span>
+                        </div>
+                        <a href="/login" class="btn-google-login" style="width: auto; padding: 0.5rem 0.9rem; font-size: 0.8rem;">
+                            <i class="fa-brands fa-google" style="color: #4285f4;"></i>
+                            <span>Sign In</span>
+                        </a>
+                    </div>
+                </div>
+                <div class="input-hint">
+                    AI Calendar Agent can access your Google Calendar & Gmail securely. Gemini 2.5 Flash may produce inaccurate results.
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+        // Global Application State
+        let currentUser = null;
+        let isProcessing = false;
+        const chatMessages = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const authContainer = document.getElementById('auth-container');
+        const authOverlay = document.getElementById('auth-overlay');
+        const systemStatusDot = document.getElementById('system-status-dot');
+        const systemStatusText = document.getElementById('system-status-text');
+
+        // Check authentication on startup
+        window.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
+        });
+
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/me');
+                const data = await response.json();
+                if (data.authenticated) {
+                    currentUser = data;
+                    renderUserProfile(data);
+                    authOverlay.style.display = 'none';
+                    chatInput.disabled = false;
+                    chatInput.placeholder = "Ask anything about your schedule, invites, or create an event...";
+                    systemStatusDot.className = 'pulse-dot';
+                    systemStatusText.innerText = `Connected: ${data.email}`;
+                } else {
+                    currentUser = null;
+                    renderLoginButton();
+                    authOverlay.style.display = 'flex';
+                    chatInput.disabled = true;
+                    systemStatusDot.className = 'pulse-dot offline';
+                    systemStatusText.innerText = 'Not Signed In';
+                }
+            } catch (err) {
+                console.error("Auth check failed:", err);
+                renderLoginButton();
+                authOverlay.style.display = 'flex';
+                chatInput.disabled = true;
+            }
+        }
+
+        function renderUserProfile(user) {
+            const initial = (user.name || user.email || 'U')[0].toUpperCase();
+            const avatarHtml = user.picture 
+                ? `<img src="${user.picture}" alt="${user.name}" onerror="this.parentElement.innerText='${initial}'">` 
+                : initial;
+
+            authContainer.innerHTML = `
+                <div class="user-card">
+                    <div class="user-details">
+                        <div class="user-avatar">${avatarHtml}</div>
+                        <div class="user-text">
+                            <div class="user-name" title="${user.name}">${user.name}</div>
+                            <div class="user-email" title="${user.email}">${user.email}</div>
+                        </div>
+                    </div>
+                    <a href="/logout" class="btn-icon" title="Sign Out">
+                        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                    </a>
+                </div>
+            `;
+        }
+
+        function renderLoginButton() {
+            authContainer.innerHTML = `
+                <a href="/login" class="btn-google-login">
+                    <i class="fa-brands fa-google" style="color: #4285f4; font-size: 1.1rem;"></i>
+                    <span>Sign in with Google</span>
+                </a>
+            `;
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+        }
+
+        // Auto-resize input textarea
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
+        }
+
+        function handleKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function sendQuickPrompt(promptText) {
+            if (!currentUser) {
+                showToast("Please sign in with Google first.", "info");
+                window.location.href = '/login';
+                return;
+            }
+            chatInput.value = promptText;
+            autoResize(chatInput);
+            sendMessage();
+            // Close mobile sidebar if open
+            document.getElementById('sidebar').classList.remove('open');
+        }
+
+        function clearChat() {
+            chatMessages.innerHTML = '';
+            chatMessages.appendChild(welcomeScreen);
+            welcomeScreen.style.display = 'flex';
+            showToast("Started a new conversation", "info");
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            const icon = type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-triangle-exclamation' : 'fa-info-circle';
+            toast.innerHTML = `<i class="fa-solid ${icon}"></i><span>${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                toast.style.transition = 'all 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function appendMessage(text, sender = 'assistant', timestamp = null) {
+            if (welcomeScreen.style.display !== 'none') {
+                welcomeScreen.style.display = 'none';
+            }
+
+            const timeStr = timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const messageRow = document.createElement('div');
+            messageRow.className = `message-row ${sender}`;
+
+            if (sender === 'assistant') {
+                const cleanHtml = DOMPurify.sanitize(marked.parse(text));
+                messageRow.innerHTML = `
+                    <div class="message-avatar assistant">
+                        <i class="fa-solid fa-robot"></i>
+                    </div>
+                    <div class="message-body">
+                        <div class="message-content">${cleanHtml}</div>
+                        <span class="message-time">${timeStr}</span>
+                    </div>
+                `;
+            } else {
+                const escapedText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                messageRow.innerHTML = `
+                    <div class="message-body">
+                        <div class="message-content">${escapedText}</div>
+                        <span class="message-time">${timeStr}</span>
+                    </div>
+                    <div class="message-avatar user">
+                        <i class="fa-solid fa-user"></i>
+                    </div>
+                `;
+            }
+
+            chatMessages.appendChild(messageRow);
+            scrollToBottom();
+        }
+
+        function showThinkingIndicator(statusText = "Analyzing your schedule...") {
+            const thinkingRow = document.createElement('div');
+            thinkingRow.id = 'thinking-indicator';
+            thinkingRow.className = 'message-row assistant';
+            thinkingRow.innerHTML = `
+                <div class="message-avatar assistant">
+                    <i class="fa-solid fa-sparkles"></i>
+                </div>
+                <div class="message-body">
+                    <div class="thinking-bubble">
+                        <div class="typing-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                        <span style="font-size: 0.82rem;">${statusText}</span>
+                    </div>
+                </div>
+            `;
+            chatMessages.appendChild(thinkingRow);
+            scrollToBottom();
+        }
+
+        function removeThinkingIndicator() {
+            const indicator = document.getElementById('thinking-indicator');
+            if (indicator) indicator.remove();
+        }
+
+        function scrollToBottom() {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const message = chatInput.value.trim();
+            if (!message || isProcessing) return;
+
+            if (!currentUser) {
+                showToast("Please sign in with Google first.", "error");
+                window.location.href = '/login';
+                return;
+            }
+
+            // Append user bubble
+            appendMessage(message, 'user');
+            chatInput.value = '';
+            chatInput.style.height = 'auto';
+            isProcessing = true;
+            sendBtn.disabled = true;
+
+            showThinkingIndicator("Connecting to Google Calendar & Gemini...");
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message })
+                });
+
+                removeThinkingIndicator();
+
+                if (response.status === 401) {
+                    showToast("Session expired. Please sign in again.", "error");
+                    checkAuth();
+                    appendMessage("⚠️ Your session has expired. Please sign in with Google to continue.", "assistant");
+                    return;
+                }
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || errorData.error || `Server returned ${response.status}`);
+                }
+
+                const data = await response.json();
+                appendMessage(data.response || data.message || "No response received.", 'assistant');
+
+            } catch (error) {
+                console.error("Chat error:", error);
+                removeThinkingIndicator();
+                appendMessage(`❌ **Error processing request**: ${error.message}`, 'assistant');
+                showToast(error.message, "error");
+            } finally {
+                isProcessing = false;
+                sendBtn.disabled = false;
+                chatInput.focus();
+            }
+        }
+    </script>
+</body>
+</html>

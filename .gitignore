@@ -11,3 +11,7 @@ credentials.json
 # Python cache
 __pycache__/
 *.pyc
+
+# Binaries & executables
+*.exe
+ngrok.exe
