@@ -507,10 +507,11 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             detail="Unauthorized. Please sign in with your Google Account first.",
         )
 
-    if not GEMINI_API_KEY:
+    clean_api_key = GEMINI_API_KEY.strip().strip("\"'") if GEMINI_API_KEY else None
+    if not clean_api_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="GEMINI_API_KEY is not configured on the server.",
+            detail="GEMINI_API_KEY is not configured on the server. Please add your Gemini API key in Render environment variables.",
         )
 
     user_message = body.message.strip()
@@ -590,18 +591,22 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         )
 
         # 3. Initialize Gemini LLM with bound tools
-        configured_model = (os.getenv("GEMINI_MODEL") or "gemini-1.5-flash").strip()
-        if configured_model in {"gemini-2.5-flash", "models/gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash"}:
-            configured_model = "gemini-1.5-flash"
-
-        model_candidates = [
+        configured_model = (os.getenv("GEMINI_MODEL") or "gemini-2.0-flash").strip()
+        raw_candidates = [
             configured_model,
-            "gemini-1.5-flash",
             "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-flash-latest",
             "gemini-1.5-pro",
+            "gemini-pro",
         ]
-        seen = set()
-        unique_candidates = [m for m in model_candidates if m and not (m in seen or seen.add(m))]
+        invalid_names = {"gemini-2.5-flash", "models/gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash"}
+        unique_candidates = []
+        for cand in raw_candidates:
+            cand_clean = cand.removeprefix("models/").strip()
+            if cand_clean and cand_clean not in invalid_names and cand_clean not in unique_candidates:
+                unique_candidates.append(cand_clean)
 
         # 4. Multi-turn Agent Execution Loop with Model Fallback
         max_iterations = 6
@@ -612,7 +617,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             try:
                 llm = ChatGoogleGenerativeAI(
                     model=model_name,
-                    google_api_key=GEMINI_API_KEY,
+                    google_api_key=clean_api_key,
                     temperature=0.2,
                 )
                 llm_with_tools = llm.bind_tools(tools)
