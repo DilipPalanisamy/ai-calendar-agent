@@ -365,10 +365,12 @@ async def login(request: Request):
         client_config = get_client_config()
         redirect_uri = get_redirect_uri(request)
 
+        # Explicitly disable PKCE verification for standard server-side OAuth
         flow = Flow.from_client_config(
             client_config=client_config,
             scopes=SCOPES,
             redirect_uri=redirect_uri,
+            autogenerate_code_verifier=False,
         )
 
         authorization_url, state = flow.authorization_url(
@@ -378,10 +380,6 @@ async def login(request: Request):
         )
 
         request.session["oauth_state"] = state
-        # Preserve PKCE code_verifier across redirects
-        if getattr(flow, "code_verifier", None):
-            request.session["code_verifier"] = flow.code_verifier
-
         return RedirectResponse(url=authorization_url)
 
     except Exception as e:
@@ -405,17 +403,14 @@ async def auth_callback(request: Request):
         client_config = get_client_config()
         redirect_uri = get_redirect_uri(request)
 
+        # Explicitly disable PKCE verification
         flow = Flow.from_client_config(
             client_config=client_config,
             scopes=SCOPES,
             state=state,
             redirect_uri=redirect_uri,
+            autogenerate_code_verifier=False,
         )
-
-        # Restore PKCE code_verifier if present
-        code_verifier = request.session.get("code_verifier")
-        if code_verifier:
-            flow.code_verifier = code_verifier
 
         # Fix scheme mismatch when behind HTTPS reverse proxies (Render / Cloudflare)
         auth_response_url = str(request.url)
@@ -449,7 +444,6 @@ async def auth_callback(request: Request):
 
         # Clear transient OAuth state
         request.session.pop("oauth_state", None)
-        request.session.pop("code_verifier", None)
 
         logger.info(f"User '{email}' successfully signed in via Google OAuth.")
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
