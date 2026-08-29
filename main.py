@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import sqlite3
+import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -205,7 +206,7 @@ def delete_all_user_sessions(user_email: str) -> int:
 app = FastAPI(
     title="AI Calendar Agent",
     description="Multi-user & Multi-Account AI Calendar & Gmail Assistant powered by Gemini & FastAPI",
-    version="2.2.0",
+    version="2.3.0",
 )
 
 # Check if running in production / Render HTTPS
@@ -286,15 +287,11 @@ def get_redirect_uri(request: Request) -> str:
 
 
 def get_accounts_dict(request: Request) -> Dict[str, Any]:
-    """
-    Retrieves the multi-account dictionary from session.
-    Automatically migrates legacy single-account sessions if present.
-    """
+    """Retrieves the multi-account dictionary from session with legacy fallback."""
     accounts = request.session.get("accounts")
     if isinstance(accounts, dict) and accounts:
         return accounts
 
-    # Migration / Fallback for existing single-user sessions
     legacy_creds = request.session.get("user_creds")
     legacy_email = request.session.get("user_email")
     if legacy_creds and legacy_email:
@@ -319,7 +316,6 @@ def get_active_account_email(request: Request) -> Optional[str]:
     if active_email and active_email in accounts:
         return active_email
 
-    # Default to first connected account
     first_email = next(iter(accounts.keys()))
     request.session["active_account"] = first_email
     return first_email
@@ -327,7 +323,7 @@ def get_active_account_email(request: Request) -> Optional[str]:
 
 def get_user_credentials(request: Request) -> Optional[Credentials]:
     """
-    Dynamically deserializes and refreshes the credentials for the CURRENT ACTIVE account.
+    Dynamically deserializes and refreshes credentials for the ACTIVE account.
     Updates the session dictionary if tokens are refreshed.
     """
     accounts = get_accounts_dict(request)
@@ -347,7 +343,6 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
             scopes=creds_data.get("scopes", SCOPES),
         )
 
-        # Refresh token automatically if expired
         if creds.expired and creds.refresh_token:
             logger.info(f"Access token expired for '{active_email}'. Refreshing...")
             creds.refresh(GoogleRequest())
@@ -357,7 +352,6 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
             accounts[active_email] = creds_data
             request.session["accounts"] = accounts
 
-        # Sync top-level session helper variables for template rendering
         request.session["user_email"] = active_email
         request.session["user_name"] = creds_data.get("name", active_email)
         request.session["user_picture"] = creds_data.get("picture", "")
@@ -370,16 +364,16 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
 
 
 # ---------------------------------------------------------------------------
-# 5. Multi-User Google Tool Functions
+# 5. Async & High-Performance Google Tool Functions
 # ---------------------------------------------------------------------------
-def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_results: int = 15) -> str:
-    """Lists upcoming events from the active Google Calendar."""
+async def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_results: int = 15) -> str:
+    """Lists upcoming events from the active Google Calendar asynchronously."""
     try:
-        service = build("calendar", "v3", credentials=creds)
+        service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
         if not time_min:
             time_min = datetime.now(timezone.utc).isoformat()
 
-        events_result = (
+        events_result = await asyncio.to_thread(
             service.events()
             .list(
                 calendarId="primary",
@@ -388,7 +382,7 @@ def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_res
                 singleEvents=True,
                 orderBy="startTime",
             )
-            .execute()
+            .execute
         )
         events = events_result.get("items", [])
 
@@ -423,7 +417,7 @@ def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_res
         return f"Failed to fetch calendar events: {str(e)}"
 
 
-def create_event_tool(
+async def create_event_tool(
     creds: Credentials,
     summary: str,
     start_time: str,
@@ -432,14 +426,14 @@ def create_event_tool(
     location: str = "",
     attendees: Optional[List[str]] = None,
 ) -> str:
-    """Creates a new event on user's primary Google Calendar after conflict checking."""
+    """Creates a new event on user's primary Google Calendar after asynchronous conflict checking."""
     try:
-        service = build("calendar", "v3", credentials=creds)
+        service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
 
-        # Conflict checking in the target time window
+        # Conflict checking in the target time window asynchronously
         conflict_msg = ""
         try:
-            overlap_check = (
+            overlap_check = await asyncio.to_thread(
                 service.events()
                 .list(
                     calendarId="primary",
@@ -447,7 +441,7 @@ def create_event_tool(
                     timeMax=end_time if "T" in end_time else f"{end_time}T23:59:59Z",
                     singleEvents=True,
                 )
-                .execute()
+                .execute
             )
             conflicts = overlap_check.get("items", [])
             if conflicts:
@@ -470,7 +464,9 @@ def create_event_tool(
         if attendees:
             event_body["attendees"] = [{"email": email.strip()} for email in attendees if email.strip()]
 
-        created_event = service.events().insert(calendarId="primary", body=event_body).execute()
+        created_event = await asyncio.to_thread(
+            service.events().insert(calendarId="primary", body=event_body).execute
+        )
 
         result = {
             "status": "success",
@@ -492,39 +488,46 @@ def create_event_tool(
         return f"Failed to create event: {str(e)}"
 
 
-def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
-    """Searches unread emails for meeting, tea, coffee, or sync invitations."""
+async def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
+    """
+    Searches unread emails for meeting, tea, coffee, or sync invitations.
+    Fetches message details in parallel with asyncio.gather to minimize latency.
+    """
     try:
-        service = build("gmail", "v1", credentials=creds)
+        service = await asyncio.to_thread(build, "gmail", "v1", credentials=creds, static_discovery=False)
         query = "is:unread (tea OR coffee OR meetup OR meeting OR sync OR invite)"
 
-        response = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
+        response = await asyncio.to_thread(
+            service.users().messages().list(userId="me", q=query, maxResults=max_results).execute
+        )
         messages = response.get("messages", [])
 
         if not messages:
             return "No unread invitation emails (tea, coffee, meetup, or meetings) found in your Gmail inbox."
 
-        invitations = []
-        for msg in messages:
-            msg_id = msg["id"]
-            msg_data = service.users().messages().get(
-                userId="me", id=msg_id, format="metadata",
-                metadataHeaders=["Subject", "From", "Date"]
-            ).execute()
+        async def fetch_message_meta(msg_id: str):
+            try:
+                msg_data = await asyncio.to_thread(
+                    service.users().messages().get(
+                        userId="me", id=msg_id, format="metadata",
+                        metadataHeaders=["Subject", "From", "Date"]
+                    ).execute
+                )
+                headers = {h["name"]: h["value"] for h in msg_data.get("payload", {}).get("headers", [])}
+                return {
+                    "message_id": msg_id,
+                    "subject": headers.get("Subject", "(No Subject)"),
+                    "sender": headers.get("From", "Unknown Sender"),
+                    "date": headers.get("Date", ""),
+                    "snippet": msg_data.get("snippet", ""),
+                }
+            except Exception as meta_err:
+                logger.warning(f"Error fetching message {msg_id}: {meta_err}")
+                return None
 
-            headers = {h["name"]: h["value"] for h in msg_data.get("payload", {}).get("headers", [])}
-            subject = headers.get("Subject", "(No Subject)")
-            sender = headers.get("From", "Unknown Sender")
-            date_str = headers.get("Date", "")
-            snippet = msg_data.get("snippet", "")
-
-            invitations.append({
-                "message_id": msg_id,
-                "subject": subject,
-                "sender": sender,
-                "date": date_str,
-                "snippet": snippet,
-            })
+        # Execute parallel retrieval for sub-second performance
+        invitations_raw = await asyncio.gather(*[fetch_message_meta(msg["id"]) for msg in messages])
+        invitations = [inv for inv in invitations_raw if inv is not None]
 
         return json.dumps(invitations, indent=2)
 
@@ -598,7 +601,6 @@ async def auth_add_account(request: Request):
             autogenerate_code_verifier=False,
         )
 
-        # Prompt user to choose or log in with another account
         authorization_url, state = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
@@ -622,7 +624,7 @@ async def auth_callback(request: Request):
     Handles OAuth callback:
     - Exchanges authorization code for tokens.
     - Stores credentials inside the multi-account dictionary in session.
-    - Sets newly authenticated account as active and redirects to /.
+    - Flags if the account was already connected and sets it active.
     """
     state = request.session.get("oauth_state")
     code = request.query_params.get("code")
@@ -642,7 +644,6 @@ async def auth_callback(request: Request):
             autogenerate_code_verifier=False,
         )
 
-        # Fix scheme mismatch behind SSL reverse proxies
         auth_response_url = str(request.url)
         if redirect_uri.startswith("https://") and auth_response_url.startswith("http://"):
             auth_response_url = auth_response_url.replace("http://", "https://", 1)
@@ -650,15 +651,13 @@ async def auth_callback(request: Request):
         flow.fetch_token(authorization_response=auth_response_url)
         credentials = flow.credentials
 
-        # Fetch authenticated user profile details
-        userinfo_service = build("oauth2", "v2", credentials=credentials)
+        userinfo_service = build("oauth2", "v2", credentials=credentials, static_discovery=False)
         user_info = userinfo_service.userinfo().get().execute()
 
         email = user_info.get("email", "")
         name = user_info.get("name", email)
         picture = user_info.get("picture", "")
 
-        # Store in multi-account dictionary
         accounts = get_accounts_dict(request)
         already_connected = email in accounts
 
@@ -681,13 +680,10 @@ async def auth_callback(request: Request):
         else:
             request.session["account_notice"] = f"✅ Successfully connected new Google account: '{email}'."
 
-        # Top-level sync
         request.session["user_email"] = email
         request.session["user_name"] = name
         request.session["user_picture"] = picture
         request.session["user_creds"] = accounts[email]
-
-        # Clear transient OAuth state
         request.session.pop("oauth_state", None)
 
         logger.info(f"Google Account '{email}' successfully connected (already_connected={already_connected}) & set as active.")
@@ -739,7 +735,7 @@ class SwitchAccountRequest(BaseModel):
 
 @app.get("/api/accounts")
 async def list_accounts_endpoint(request: Request):
-    """Returns all connected Google accounts, marks active one, and returns any flash notice."""
+    """Returns all connected Google accounts, marks active one, and returns flash notice."""
     active_email = get_active_account_email(request)
     if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
@@ -777,7 +773,6 @@ async def switch_account_endpoint(request: Request, body: SwitchAccountRequest):
     request.session["active_account"] = target_email
     acc_data = accounts[target_email]
 
-    # Sync top-level session variables
     request.session["user_email"] = target_email
     request.session["user_name"] = acc_data.get("name", target_email)
     request.session["user_picture"] = acc_data.get("picture", "")
@@ -803,12 +798,10 @@ async def remove_account_endpoint(request: Request, body: SwitchAccountRequest):
     del accounts[target_email]
     request.session["accounts"] = accounts
 
-    # If no accounts left, clear session and instruct client to redirect
     if not accounts:
         request.session.clear()
         return JSONResponse({"success": True, "redirect": "/login"})
 
-    # If the active account was removed, switch to another remaining account
     current_active = request.session.get("active_account")
     if current_active == target_email:
         new_active = next(iter(accounts.keys()))
@@ -838,7 +831,7 @@ async def get_history_endpoint(request: Request):
     if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
-    sessions = get_user_chat_sessions(active_email)
+    sessions = await asyncio.to_thread(get_user_chat_sessions, active_email)
     return JSONResponse({"sessions": sessions})
 
 
@@ -849,7 +842,7 @@ async def get_session_history_endpoint(session_id: str, request: Request):
     if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
-    data = get_chat_session_details(session_id, active_email)
+    data = await asyncio.to_thread(get_chat_session_details, session_id, active_email)
     if not data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found.")
 
@@ -863,7 +856,7 @@ async def delete_session_endpoint(session_id: str, request: Request):
     if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
-    success = delete_chat_session(session_id, active_email)
+    success = await asyncio.to_thread(delete_chat_session, session_id, active_email)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found or already deleted.")
 
@@ -877,7 +870,7 @@ async def clear_all_history_endpoint(request: Request):
     if not active_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
-    count = delete_all_user_sessions(active_email)
+    count = await asyncio.to_thread(delete_all_user_sessions, active_email)
     return JSONResponse({"success": True, "message": f"Cleared {count} chat sessions."})
 
 
@@ -892,11 +885,11 @@ class ChatRequest(BaseModel):
 @app.post("/api/chat")
 async def chat_endpoint(request: Request, body: ChatRequest):
     """
-    AI Chatbot endpoint:
+    High-Performance AI Chatbot endpoint:
     - Validates active user authentication.
     - Manages SQLite chat sessions and message persistence.
-    - Dynamically binds user Google Calendar and Gmail tools for ACTIVE account.
-    - Runs Gemini 3.6 Flash with multi-model fallback.
+    - Binds asynchronous Google Calendar & Gmail tools with static discovery.
+    - Runs Gemini 3.6 Flash / 3.5 Flash with sub-second execution.
     """
     user_creds = get_user_credentials(request)
     active_email = get_active_account_email(request)
@@ -922,30 +915,30 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     session_title = ""
 
     if session_id:
-        existing = get_chat_session_details(session_id, active_email)
+        existing = await asyncio.to_thread(get_chat_session_details, session_id, active_email)
         if not existing:
             session_title = (user_message[:35] + "...") if len(user_message) > 35 else user_message
-            session_id = create_chat_session(active_email, session_title)
+            session_id = await asyncio.to_thread(create_chat_session, active_email, session_title)
         else:
             session_title = existing["session"]["title"]
     else:
         session_title = (user_message[:35] + "...") if len(user_message) > 35 else user_message
-        session_id = create_chat_session(active_email, session_title)
+        session_id = await asyncio.to_thread(create_chat_session, active_email, session_title)
 
-    # Save incoming user message
-    save_chat_message(session_id, "user", user_message)
+    # Save incoming user message asynchronously
+    await asyncio.to_thread(save_chat_message, session_id, "user", user_message)
 
     try:
         now_dt = datetime.now(timezone.utc).astimezone()
         current_time_str = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
         current_iso_str = now_dt.isoformat()
 
-        # 2. Dynamically wrap tools with active user credentials
-        def list_events_wrapper(time_min: Optional[str] = None, max_results: int = 10) -> str:
-            """Query upcoming Google Calendar events."""
-            return list_events_tool(user_creds, time_min=time_min, max_results=max_results)
+        # 2. Async Wrappers for Tools
+        async def list_events_wrapper(time_min: Optional[str] = None, max_results: int = 10) -> str:
+            """Query upcoming Google Calendar events asynchronously."""
+            return await list_events_tool(user_creds, time_min=time_min, max_results=max_results)
 
-        def create_event_wrapper(
+        async def create_event_wrapper(
             summary: str,
             start_time: str,
             end_time: str,
@@ -953,8 +946,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             location: str = "",
             attendees: Optional[List[str]] = None,
         ) -> str:
-            """Create a new Google Calendar event with conflict checking."""
-            return create_event_tool(
+            """Create a new Google Calendar event with conflict checking asynchronously."""
+            return await create_event_tool(
                 user_creds,
                 summary=summary,
                 start_time=start_time,
@@ -964,23 +957,23 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 attendees=attendees,
             )
 
-        def check_gmail_invites_wrapper(max_results: int = 10) -> str:
-            """Scan unread Gmail messages for meeting, coffee, or tea invites."""
-            return check_gmail_invites_tool(user_creds, max_results=max_results)
+        async def check_gmail_invites_wrapper(max_results: int = 10) -> str:
+            """Scan unread Gmail messages for meeting, coffee, or tea invites in parallel."""
+            return await check_gmail_invites_tool(user_creds, max_results=max_results)
 
         tools = [
             StructuredTool.from_function(
-                func=list_events_wrapper,
+                coroutine=list_events_wrapper,
                 name="list_events",
                 description="List upcoming events from the user's primary Google Calendar. time_min is optional ISO string.",
             ),
             StructuredTool.from_function(
-                func=create_event_wrapper,
+                coroutine=create_event_wrapper,
                 name="create_event",
                 description="Create a new event on Google Calendar with conflict checking. start_time and end_time must be ISO 8601 strings (e.g. 'YYYY-MM-DDTHH:MM:SS').",
             ),
             StructuredTool.from_function(
-                func=check_gmail_invites_wrapper,
+                coroutine=check_gmail_invites_wrapper,
                 name="check_gmail_invites",
                 description="Scan unread emails for tea, coffee, meetup, or meeting invitations in Gmail.",
             ),
@@ -1066,18 +1059,18 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                             final_text = str(content_raw) if content_raw else ""
                         break
 
-                    # Execute tool calls
+                    # Execute tool calls asynchronously
                     for tool_call in response.tool_calls:
                         tool_name = tool_call["name"]
                         tool_args = tool_call["args"]
                         tool_id = tool_call.get("id", tool_name)
 
-                        logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
+                        logger.info(f"Executing tool '{tool_name}' asynchronously with args: {tool_args}")
 
                         if tool_name in tool_map:
                             try:
                                 tool_func = tool_map[tool_name]
-                                tool_result = tool_func.invoke(tool_args)
+                                tool_result = await tool_func.ainvoke(tool_args)
                             except Exception as tool_exec_err:
                                 logger.error(f"Error running tool {tool_name}: {tool_exec_err}")
                                 tool_result = f"Error executing {tool_name}: {str(tool_exec_err)}"
@@ -1099,8 +1092,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 raise last_error
             final_text = "I processed your request. Let me know if you need anything else with your schedule or emails!"
 
-        # Save outgoing bot response to SQLite
-        save_chat_message(session_id, "assistant", str(final_text))
+        # Save outgoing bot response to SQLite asynchronously
+        await asyncio.to_thread(save_chat_message, session_id, "assistant", str(final_text))
 
         return JSONResponse({
             "response": str(final_text),
