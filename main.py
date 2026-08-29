@@ -729,6 +729,167 @@ async def delete_calendar_event_tool(
         return f"Failed to delete event: {str(e)}"
 
 
+async def update_calendar_event_tool(
+    creds: Credentials,
+    event_id: Optional[str] = None,
+    summary_search: Optional[str] = None,
+    calendar_id: str = "primary",
+    new_title: Optional[str] = None,
+    new_start_datetime: Optional[str] = None,
+    new_end_datetime: Optional[str] = None,
+    new_duration_minutes: Optional[int] = None,
+    new_description: Optional[str] = None,
+    new_location: Optional[str] = None,
+) -> str:
+    """
+    Updates, reschedules, moves, extends, or renames an existing Google Calendar event using patch() in IST.
+    """
+    try:
+        service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
+        target_id = event_id.strip() if event_id else None
+
+        # 1. Search for event_id if not provided directly
+        if not target_id:
+            if not summary_search:
+                return "Error: Please specify either an `event_id` or `summary_search` (event title) to update."
+
+            now_iso = datetime.now(ZoneInfo(CALENDAR_TIMEZONE)).isoformat()
+            events_result = await asyncio.to_thread(
+                service.events()
+                .list(
+                    calendarId=calendar_id,
+                    q=summary_search,
+                    timeMin=now_iso,
+                    maxResults=5,
+                    singleEvents=True,
+                )
+                .execute
+            )
+            items = events_result.get("items", [])
+            if not items:
+                # Fallback search without timeMin
+                events_result = await asyncio.to_thread(
+                    service.events()
+                    .list(
+                        calendarId=calendar_id,
+                        q=summary_search,
+                        maxResults=5,
+                        singleEvents=True,
+                    )
+                    .execute
+                )
+                items = events_result.get("items", [])
+
+            if not items:
+                return f"Could not find any calendar event matching '{summary_search}' to update."
+
+            matched_event = items[0]
+            target_id = matched_event["id"]
+
+        # 2. Retrieve existing event details for duration/time calculations
+        existing_event = await asyncio.to_thread(
+            service.events().get(calendarId=calendar_id, eventId=target_id).execute
+        )
+
+        patch_body: Dict[str, Any] = {}
+
+        if new_title:
+            patch_body["summary"] = new_title
+
+        if new_description is not None:
+            patch_body["description"] = new_description
+
+        if new_location is not None:
+            patch_body["location"] = new_location
+
+        # Handle start and end times in IST
+        if new_start_datetime:
+            norm_new_start = normalize_iso_datetime(new_start_datetime, CALENDAR_TIMEZONE)
+            patch_body["start"] = {
+                "dateTime": norm_new_start,
+                "timeZone": CALENDAR_TIMEZONE,
+            }
+
+            # If new end time is explicitly given
+            if new_end_datetime:
+                norm_new_end = normalize_iso_datetime(new_end_datetime, CALENDAR_TIMEZONE)
+                patch_body["end"] = {
+                    "dateTime": norm_new_end,
+                    "timeZone": CALENDAR_TIMEZONE,
+                }
+            elif new_duration_minutes:
+                start_dt = datetime.fromisoformat(norm_new_start)
+                end_dt = start_dt + timedelta(minutes=new_duration_minutes)
+                patch_body["end"] = {
+                    "dateTime": end_dt.isoformat(),
+                    "timeZone": CALENDAR_TIMEZONE,
+                }
+            else:
+                # Preserve original duration
+                orig_start_str = existing_event.get("start", {}).get("dateTime") or existing_event.get("start", {}).get("date")
+                orig_end_str = existing_event.get("end", {}).get("dateTime") or existing_event.get("end", {}).get("date")
+                if orig_start_str and orig_end_str:
+                    try:
+                        orig_start = datetime.fromisoformat(normalize_iso_datetime(orig_start_str, CALENDAR_TIMEZONE))
+                        orig_end = datetime.fromisoformat(normalize_iso_datetime(orig_end_str, CALENDAR_TIMEZONE))
+                        orig_dur = orig_end - orig_start
+                        start_dt = datetime.fromisoformat(norm_new_start)
+                        patch_body["end"] = {
+                            "dateTime": (start_dt + orig_dur).isoformat(),
+                            "timeZone": CALENDAR_TIMEZONE,
+                        }
+                    except Exception:
+                        pass
+        elif new_end_datetime:
+            norm_new_end = normalize_iso_datetime(new_end_datetime, CALENDAR_TIMEZONE)
+            patch_body["end"] = {
+                "dateTime": norm_new_end,
+                "timeZone": CALENDAR_TIMEZONE,
+            }
+        elif new_duration_minutes:
+            orig_start_str = existing_event.get("start", {}).get("dateTime") or existing_event.get("start", {}).get("date")
+            if orig_start_str:
+                orig_start = datetime.fromisoformat(normalize_iso_datetime(orig_start_str, CALENDAR_TIMEZONE))
+                new_end = orig_start + timedelta(minutes=new_duration_minutes)
+                patch_body["end"] = {
+                    "dateTime": new_end.isoformat(),
+                    "timeZone": CALENDAR_TIMEZONE,
+                }
+
+        if not patch_body:
+            return "No modification parameters provided to update the event."
+
+        updated_event = await asyncio.to_thread(
+            service.events().patch(
+                calendarId=calendar_id,
+                eventId=target_id,
+                body=patch_body,
+            ).execute
+        )
+
+        start_val = updated_event.get("start", {}).get("dateTime") or updated_event.get("start", {}).get("date")
+        end_val = updated_event.get("end", {}).get("dateTime") or updated_event.get("end", {}).get("date")
+
+        result = {
+            "status": "success",
+            "message": f"Successfully updated event: '{updated_event.get('summary')}'",
+            "event_id": updated_event.get("id"),
+            "htmlLink": updated_event.get("htmlLink"),
+            "start": start_val,
+            "end": end_val,
+            "timeZone": CALENDAR_TIMEZONE,
+            "location": updated_event.get("location", ""),
+        }
+        return json.dumps(result, indent=2)
+
+    except HttpError as err:
+        logger.error(f"Google Calendar Patch Error: {err}")
+        return f"Error updating calendar event: {err}"
+    except Exception as e:
+        logger.error(f"Unexpected error in update_calendar_event: {e}")
+        return f"Failed to update event: {str(e)}"
+
+
 async def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
     """
     Searches unread emails for meeting, tea, coffee, or sync invitations.
@@ -1233,6 +1394,29 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 ignore_conflicts=ignore_conflicts,
             )
 
+        async def update_calendar_event_wrapper(
+            event_id: Optional[str] = None,
+            summary_search: Optional[str] = None,
+            new_title: Optional[str] = None,
+            new_start_datetime: Optional[str] = None,
+            new_end_datetime: Optional[str] = None,
+            new_duration_minutes: Optional[int] = None,
+            new_description: Optional[str] = None,
+            new_location: Optional[str] = None,
+        ) -> str:
+            """Update, reschedule, move, extend, or rename an existing Google Calendar event."""
+            return await update_calendar_event_tool(
+                user_creds,
+                event_id=event_id,
+                summary_search=summary_search,
+                new_title=new_title,
+                new_start_datetime=new_start_datetime,
+                new_end_datetime=new_end_datetime,
+                new_duration_minutes=new_duration_minutes,
+                new_description=new_description,
+                new_location=new_location,
+            )
+
         async def delete_calendar_event_wrapper(
             event_id: Optional[str] = None,
             summary: Optional[str] = None,
@@ -1257,6 +1441,11 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 description="Create Google Calendar event in IST (+05:30). Returns conflict details and alternative slots if time is occupied. Set ignore_conflicts=True to force schedule.",
             ),
             StructuredTool.from_function(
+                coroutine=update_calendar_event_wrapper,
+                name="update_calendar_event",
+                description="Update, reschedule, move, extend, or rename an existing Google Calendar event. Provide event_id or summary_search, and modified fields (new_title, new_start_datetime, new_end_datetime, new_duration_minutes).",
+            ),
+            StructuredTool.from_function(
                 coroutine=delete_calendar_event_wrapper,
                 name="delete_calendar_event",
                 description="Delete Google Calendar event by event_id or title.",
@@ -1270,7 +1459,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST) & Smart Conflict Handling
+        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Smart Conflict & Event Editing
         system_prompt = (
             "System Directive: You are a high-speed calendar AI assistant. Be concise, direct, and helpful. "
             f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
@@ -1292,8 +1481,12 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "     * If user picks an alternative slot, call `create_event` with that slot.\n"
             "     * If user says 'Schedule anyway' or 'Force schedule', call `create_event` with `ignore_conflicts=True`.\n"
             "   - If `create_event` succeeds, give a 1-sentence confirmation with event title, start/end time in IST, clickable link, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
-            "3. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
-            "4. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
+            "3. When user asks to edit, move, reschedule, extend, or rename an event (e.g. 'Move my 4 PM meeting to 5 PM', 'Extend workout by 30 mins', 'Rename sync to Strategy'):\n"
+            "   - You can call `update_calendar_event` directly with summary_search='...' and new fields (or search via `list_events` first if needed).\n"
+            "   - Compute any new datetimes in IST ('Asia/Kolkata' +05:30).\n"
+            "   - Confirm the modification in 1 short sentence with the updated event title, new time in IST, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "4. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
+            "5. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
         )
 
         # 4. Initialize Gemini LLM with active Google AI models
