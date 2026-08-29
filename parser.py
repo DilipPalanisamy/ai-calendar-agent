@@ -17,14 +17,14 @@ load_dotenv()
 
 def get_gemini_model_candidates(preferred_model: str | None = None):
     """Return a safe list of Gemini model names, avoiding legacy unsupported ones."""
-    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-3.5-flash").strip()
+    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-3.6-flash").strip()
     normalized = configured_model.removeprefix("models/") if configured_model.startswith("models/") else configured_model
 
     candidates = []
-    if normalized and normalized not in {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest"}:
+    if normalized and normalized not in {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest", "gemini-pro"}:
         candidates.append(normalized)
 
-    for fallback_model in ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "gemini-2.0-flash"]:
+    for fallback_model in ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"]:
         if fallback_model not in candidates:
             candidates.append(fallback_model)
 
