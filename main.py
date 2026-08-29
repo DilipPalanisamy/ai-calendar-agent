@@ -489,10 +489,11 @@ async def create_event_tool(
     location: str = "",
     attendees: Optional[List[str]] = None,
     add_google_meet: bool = False,
+    travel_buffer_minutes: Optional[int] = None,
     ignore_conflicts: bool = False,
 ) -> str:
     """
-    Creates a new event on user's primary Google Calendar with smart conflict detection, Google Meet video link generation, and guest invitations in IST.
+    Creates a new event on user's primary Google Calendar with smart conflict detection, automated travel time buffers, Google Meet video link generation, and guest invitations in IST.
     """
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
@@ -612,7 +613,44 @@ async def create_event_tool(
                 }
                 return json.dumps(conflict_response, indent=2)
 
-        # 2. Insert event if no conflict or if ignore_conflicts=True
+        # 2. Automated Travel Time Buffer Creation (if location specified)
+        buffer_info = None
+        buffer_minutes = travel_buffer_minutes if travel_buffer_minutes is not None else (30 if location.strip() else 0)
+
+        if location.strip() and buffer_minutes > 0:
+            buf_start_dt = req_start - timedelta(minutes=buffer_minutes)
+            buf_end_dt = req_start
+            buf_start_iso = buf_start_dt.isoformat()
+            buf_end_iso = buf_end_dt.isoformat()
+
+            buffer_body = {
+                "summary": f"🚗 Travel to {location.strip()}",
+                "description": f"Automated {buffer_minutes}-minute travel buffer before '{summary}'.",
+                "start": {
+                    "dateTime": buf_start_iso,
+                    "timeZone": CALENDAR_TIMEZONE,
+                },
+                "end": {
+                    "dateTime": buf_end_iso,
+                    "timeZone": CALENDAR_TIMEZONE,
+                },
+                "colorId": "5",  # Yellow / Banana in Google Calendar
+            }
+            try:
+                created_buf = await asyncio.to_thread(
+                    service.events().insert(calendarId="primary", body=buffer_body).execute
+                )
+                buffer_info = {
+                    "minutes": buffer_minutes,
+                    "start": buf_start_iso,
+                    "end": buf_end_iso,
+                    "event_id": created_buf.get("id"),
+                    "summary": buffer_body["summary"],
+                }
+            except Exception as buf_err:
+                logger.warning(f"Failed to create travel buffer event: {buf_err}")
+
+        # 3. Insert Main Event
         event_body: Dict[str, Any] = {
             "summary": summary,
             "description": description or "Scheduled via AI Calendar Agent",
@@ -660,17 +698,22 @@ async def create_event_tool(
             or None
         )
 
+        msg_parts = [f"Successfully created event: '{summary}'"]
+        if buffer_info:
+            msg_parts.append(f"with an automated {buffer_minutes}-minute travel buffer (🚗 {buf_start_dt.strftime('%I:%M %p')} - {buf_end_dt.strftime('%I:%M %p')})")
+
         result = {
             "status": "success",
-            "message": f"Successfully created event: '{summary}'",
+            "message": " ".join(msg_parts),
             "event_id": created_event.get("id"),
             "htmlLink": created_event.get("htmlLink"),
             "google_meet_link": meet_link,
             "attendees": attendees if attendees else [],
+            "location": location,
+            "travel_buffer": buffer_info,
             "start": norm_start,
             "end": norm_end,
             "timeZone": CALENDAR_TIMEZONE,
-            "location": location,
         }
         return json.dumps(result, indent=2)
 
@@ -1408,9 +1451,10 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             location: str = "",
             attendees: Optional[List[str]] = None,
             add_google_meet: bool = False,
+            travel_buffer_minutes: Optional[int] = None,
             ignore_conflicts: bool = False,
         ) -> str:
-            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection, Google Meet video link generation, and attendee invitations."""
+            """Create a new Google Calendar event in Indian Standard Time (IST) with smart conflict detection, automated travel time buffers, Google Meet video link generation, and attendee invitations."""
             return await create_event_tool(
                 user_creds,
                 summary=summary,
@@ -1420,6 +1464,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 location=location,
                 attendees=attendees,
                 add_google_meet=add_google_meet,
+                travel_buffer_minutes=travel_buffer_minutes,
                 ignore_conflicts=ignore_conflicts,
             )
 
@@ -1467,7 +1512,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             StructuredTool.from_function(
                 coroutine=create_event_wrapper,
                 name="create_event",
-                description="Create Google Calendar event in IST (+05:30). Set add_google_meet=True to generate a Google Meet video call link. Pass guest email addresses in attendees list.",
+                description="Create Google Calendar event in IST (+05:30). Automatically creates a travel time buffer before the event if location is provided. Set add_google_meet=True to generate a Google Meet link. Pass guest emails in attendees list.",
             ),
             StructuredTool.from_function(
                 coroutine=update_calendar_event_wrapper,
@@ -1488,7 +1533,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Smart Conflict & Google Meet
+        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Travel Buffer & Google Meet
         system_prompt = (
             "System Directive: You are a high-speed calendar AI assistant. Be concise, direct, and helpful. "
             f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
@@ -1500,6 +1545,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "Instructions:\n"
             "1. When user asks about schedule or availability, call `list_events` with time_min relative to Current Local DateTime.\n"
             "2. When user asks to create/schedule an event:\n"
+            "   - If a physical location/venue is mentioned (e.g. 'Hotel Residency', 'Client Office', 'Cafe Coffee Day'), extract it into `location` and specify `travel_buffer_minutes=30` (or user-specified buffer).\n"
             "   - Extract guest emails into `attendees` (e.g. ['colleague@example.com']).\n"
             "   - Set `add_google_meet=True` if the user mentions Google Meet, video call, meeting link, online sync, or invites guests.\n"
             "   - Compute start_time and end_time in IST with '+05:30' offset and call `create_event`.\n"
@@ -1512,7 +1558,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "     * If user picks an alternative slot, call `create_event` with that slot.\n"
             "     * If user says 'Schedule anyway' or 'Force schedule', call `create_event` with `ignore_conflicts=True`.\n"
             "   - If `create_event` succeeds, give a clear confirmation with:\n"
-            "     * Event title, start/end time in IST, and calendar event link.\n"
+            "     * Event title, start/end time in IST, location, and calendar event link.\n"
+            "     * If a travel buffer was created, mention it clearly: '🚗 Travel Buffer added: [Time]'.\n"
             "     * If a Google Meet link was created, display it as a clickable link: '[📹 Join with Google Meet](MEET_URL)'.\n"
             "     * If attendees were invited, mention them: 'Invites sent to: [emails]'.\n"
             "     * Include delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
