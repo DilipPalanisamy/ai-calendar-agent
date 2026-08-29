@@ -375,12 +375,17 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
     creds_data = accounts[active_email]
 
     try:
+        client_config = get_client_config()
+        client_info = client_config.get("web") or client_config.get("installed") or {}
+        client_id = creds_data.get("client_id") or client_info.get("client_id") or GOOGLE_CLIENT_ID
+        client_secret = creds_data.get("client_secret") or client_info.get("client_secret") or GOOGLE_CLIENT_SECRET
+
         creds = Credentials(
             token=creds_data.get("token"),
             refresh_token=creds_data.get("refresh_token"),
             token_uri=creds_data.get("token_uri", "https://oauth2.googleapis.com/token"),
-            client_id=creds_data.get("client_id"),
-            client_secret=creds_data.get("client_secret"),
+            client_id=client_id,
+            client_secret=client_secret,
             scopes=creds_data.get("scopes", SCOPES),
         )
 
@@ -397,7 +402,6 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
         request.session["user_email"] = active_email
         request.session["user_name"] = creds_data.get("name", active_email)
         request.session["user_picture"] = creds_data.get("picture", "")
-        request.session["user_creds"] = creds_data
 
         return creds
     except Exception as e:
@@ -779,13 +783,11 @@ async def auth_callback(request: Request):
         accounts = dict(existing_accounts)
         already_connected = email in accounts
 
+        # Store compact credentials per account so multi-account sessions fit well within cookie limit
         accounts[email] = {
             "token": credentials.token,
             "refresh_token": credentials.refresh_token,
-            "token_uri": credentials.token_uri,
-            "client_id": credentials.client_id,
-            "client_secret": credentials.client_secret,
-            "scopes": credentials.scopes,
+            "token_uri": credentials.token_uri or "https://oauth2.googleapis.com/token",
             "name": name,
             "picture": picture,
         }
@@ -803,7 +805,6 @@ async def auth_callback(request: Request):
         request.session["user_email"] = email
         request.session["user_name"] = name
         request.session["user_picture"] = picture
-        request.session["user_creds"] = accounts[email]
         request.session.pop("oauth_state", None)
 
         logger.info(f"Google Account '{email}' successfully merged into session (total accounts: {len(accounts)}) & set as active.")
@@ -896,7 +897,6 @@ async def switch_account_endpoint(request: Request, body: SwitchAccountRequest):
     request.session["user_email"] = target_email
     request.session["user_name"] = acc_data.get("name", target_email)
     request.session["user_picture"] = acc_data.get("picture", "")
-    request.session["user_creds"] = acc_data
     request.session["accounts"] = accounts
 
     logger.info(f"Switched active account to: {target_email}")
