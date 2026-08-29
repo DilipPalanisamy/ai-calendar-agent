@@ -74,6 +74,13 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# Check if running in production / Render HTTPS
+IS_PRODUCTION = bool(
+    os.getenv("RENDER")
+    or (RENDER_EXTERNAL_URL and RENDER_EXTERNAL_URL.startswith("https"))
+    or os.getenv("ENVIRONMENT", "").lower() == "production"
+)
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -90,7 +97,7 @@ app.add_middleware(
     session_cookie="ai_calendar_session",
     max_age=14 * 24 * 3600,  # 14 days
     same_site="lax",
-    https_only=False,
+    https_only=IS_PRODUCTION,
 )
 
 
@@ -131,9 +138,16 @@ def get_client_config() -> Dict[str, Any]:
 
 def get_redirect_uri(request: Request) -> str:
     """Dynamically determine the OAuth callback redirect URI."""
-    if RENDER_EXTERNAL_URL:
+    if RENDER_EXTERNAL_URL and RENDER_EXTERNAL_URL != "http://localhost:8000":
         base = RENDER_EXTERNAL_URL.rstrip("/")
         return f"{base}/auth/callback"
+
+    # Handle proxy SSL on Render / Cloud Load Balancers
+    if request.headers.get("x-forwarded-proto") == "https":
+        url = str(request.url_for("auth_callback"))
+        if url.startswith("http://"):
+            return url.replace("http://", "https://", 1)
+
     return str(request.url_for("auth_callback"))
 
 
@@ -364,6 +378,10 @@ async def login(request: Request):
         )
 
         request.session["oauth_state"] = state
+        # Preserve PKCE code_verifier across redirects
+        if getattr(flow, "code_verifier", None):
+            request.session["code_verifier"] = flow.code_verifier
+
         return RedirectResponse(url=authorization_url)
 
     except Exception as e:
@@ -394,8 +412,18 @@ async def auth_callback(request: Request):
             redirect_uri=redirect_uri,
         )
 
+        # Restore PKCE code_verifier if present
+        code_verifier = request.session.get("code_verifier")
+        if code_verifier:
+            flow.code_verifier = code_verifier
+
+        # Fix scheme mismatch when behind HTTPS reverse proxies (Render / Cloudflare)
+        auth_response_url = str(request.url)
+        if redirect_uri.startswith("https://") and auth_response_url.startswith("http://"):
+            auth_response_url = auth_response_url.replace("http://", "https://", 1)
+
         # Exchange authorization code for tokens
-        flow.fetch_token(authorization_response=str(request.url))
+        flow.fetch_token(authorization_response=auth_response_url)
         credentials = flow.credentials
 
         # Fetch authenticated user profile details
@@ -419,11 +447,15 @@ async def auth_callback(request: Request):
             "scopes": credentials.scopes,
         }
 
+        # Clear transient OAuth state
+        request.session.pop("oauth_state", None)
+        request.session.pop("code_verifier", None)
+
         logger.info(f"User '{email}' successfully signed in via Google OAuth.")
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     except Exception as e:
-        logger.error(f"OAuth token exchange failed: {e}")
+        logger.error(f"OAuth token exchange failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to authenticate with Google: {str(e)}",
