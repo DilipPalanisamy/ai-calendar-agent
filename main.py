@@ -734,67 +734,86 @@ async def create_event_tool(
 
 async def delete_calendar_event_tool(
     creds: Credentials,
+    event_ids: Optional[List[str]] = None,
     event_id: Optional[str] = None,
     summary: Optional[str] = None,
     time_min: Optional[str] = None,
+    time_max: Optional[str] = None,
+    send_updates: str = "all",
 ) -> str:
     """
-    Deletes a calendar event from the user's primary Google Calendar.
-    Accepts either an explicit event_id or searches by title/summary.
+    Deletes single or multiple calendar events from user's primary Google Calendar with sendUpdates='all'.
+    Accepts a list of event_ids, single event_id, or searches by title/summary and time range in IST.
     """
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
 
-        target_id = event_id.strip() if event_id else None
-        target_summary = summary or ""
+        target_ids: List[str] = []
+        if event_ids:
+            target_ids.extend([eid.strip() for eid in event_ids if eid.strip()])
+        if event_id and event_id.strip() and event_id.strip() not in target_ids:
+            target_ids.append(event_id.strip())
 
-        if not target_id:
-            if not summary:
-                return "Please specify either an event_id or the title/summary of the event you would like to delete."
+        # If no explicit IDs provided, search by summary and time window
+        if not target_ids:
+            if not summary and not time_min and not time_max:
+                return "Please specify event_ids, event_id, or a title/time range to delete."
 
-            search_time_min = time_min or datetime.now(timezone.utc).isoformat()
+            search_kwargs: Dict[str, Any] = {
+                "calendarId": "primary",
+                "singleEvents": True,
+                "maxResults": 20,
+            }
+            if summary:
+                search_kwargs["q"] = summary.strip()
+            if time_min:
+                search_kwargs["timeMin"] = normalize_iso_datetime(time_min, CALENDAR_TIMEZONE)
+            if time_max:
+                search_kwargs["timeMax"] = normalize_iso_datetime(time_max, CALENDAR_TIMEZONE)
+
             events_result = await asyncio.to_thread(
-                service.events()
-                .list(
-                    calendarId="primary",
-                    q=summary,
-                    timeMin=search_time_min,
-                    maxResults=5,
-                    singleEvents=True,
-                )
-                .execute
+                service.events().list(**search_kwargs).execute
             )
             items = events_result.get("items", [])
-            if not items:
-                # Fallback search without time constraint
+
+            if not items and summary:
+                # Fallback search without time constraints
                 events_result = await asyncio.to_thread(
-                    service.events()
-                    .list(
-                        calendarId="primary",
-                        q=summary,
-                        maxResults=5,
-                        singleEvents=True,
-                    )
-                    .execute
+                    service.events().list(calendarId="primary", q=summary.strip(), maxResults=10, singleEvents=True).execute
                 )
                 items = events_result.get("items", [])
 
             if not items:
-                return f"Could not find any calendar event matching '{summary}' to delete."
+                search_desc = f"matching '{summary}'" if summary else "in the specified time range"
+                return f"Could not find any calendar events {search_desc} to delete."
 
-            matched_event = items[0]
-            target_id = matched_event["id"]
-            target_summary = matched_event.get("summary", summary)
+            target_ids = [item["id"] for item in items]
 
-        # Delete event
-        await asyncio.to_thread(
-            service.events().delete(calendarId="primary", eventId=target_id).execute
-        )
+        deleted_count = 0
+        deleted_details = []
+        failed_errors = []
+
+        for eid in target_ids:
+            try:
+                await asyncio.to_thread(
+                    service.events().delete(
+                        calendarId="primary",
+                        eventId=eid,
+                        sendUpdates=send_updates,
+                    ).execute
+                )
+                deleted_count += 1
+                deleted_details.append(eid)
+            except Exception as del_err:
+                logger.warning(f"Error deleting event {eid}: {del_err}")
+                failed_errors.append(f"ID {eid}: {str(del_err)}")
 
         result = {
-            "status": "success",
-            "message": f"Successfully deleted event '{target_summary}' (ID: {target_id}) from Google Calendar.",
-            "event_id": target_id,
+            "status": "success" if deleted_count > 0 else "error",
+            "deleted_count": deleted_count,
+            "deleted_event_ids": deleted_details,
+            "message": f"Successfully deleted {deleted_count} calendar event(s)." if deleted_count > 0 else "Failed to delete specified events.",
+            "errors": failed_errors if failed_errors else None,
         }
         return json.dumps(result, indent=2)
 
@@ -1500,13 +1519,24 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 new_location=new_location,
             )
 
-        async def delete_calendar_event_wrapper(
+        async def delete_calendar_events_wrapper(
+            event_ids: Optional[List[str]] = None,
             event_id: Optional[str] = None,
             summary: Optional[str] = None,
             time_min: Optional[str] = None,
+            time_max: Optional[str] = None,
+            send_updates: str = "all",
         ) -> str:
-            """Delete an event from user's primary Google Calendar by event_id or title."""
-            return await delete_calendar_event_tool(user_creds, event_id=event_id, summary=summary, time_min=time_min)
+            """Delete single or multiple Google Calendar events by list of event_ids, single event_id, or search query."""
+            return await delete_calendar_event_tool(
+                user_creds,
+                event_ids=event_ids,
+                event_id=event_id,
+                summary=summary,
+                time_min=time_min,
+                time_max=time_max,
+                send_updates=send_updates,
+            )
 
         async def check_gmail_invites_wrapper(max_results: int = 10) -> str:
             """Scan unread Gmail messages for meeting, coffee, or tea invites in parallel."""
@@ -1529,9 +1559,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 description="Update, reschedule, move, extend, or rename an existing Google Calendar event. Provide event_id or summary_search, and modified fields (new_title, new_start_datetime, new_end_datetime, new_duration_minutes).",
             ),
             StructuredTool.from_function(
-                coroutine=delete_calendar_event_wrapper,
-                name="delete_calendar_event",
-                description="Delete Google Calendar event by event_id or title.",
+                coroutine=delete_calendar_events_wrapper,
+                name="delete_calendar_events",
+                description="Delete single or multiple Google Calendar events. Accepts a list of event_ids (for bulk cleanup), single event_id, or summary/time window search query.",
             ),
             StructuredTool.from_function(
                 coroutine=check_gmail_invites_wrapper,
@@ -1542,7 +1572,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Recurring Rules & Travel Buffer
+        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST), Safe Bulk Deletions, Recurring & Travel Buffer
         system_prompt = (
             "System Directive: You are a high-speed calendar AI assistant. Be concise, direct, and helpful. "
             f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
@@ -1554,37 +1584,33 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "Instructions:\n"
             "1. When user asks about schedule or availability, call `list_events` with time_min relative to Current Local DateTime.\n"
             "2. When user asks to create/schedule an event:\n"
-            "   - If the event is recurring/repeating, parse the user's frequency into a valid RFC 5545 RRULE string for `recurrence_rule`:\n"
-            "     * 'Every day' / 'Daily' -> 'FREQ=DAILY'\n"
-            "     * 'Every weekday' / 'Mon to Fri' -> 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'\n"
-            "     * 'Every weekend' -> 'FREQ=WEEKLY;BYDAY=SA,SU'\n"
+            "   - If recurring, parse frequency into valid RFC 5545 RRULE string for `recurrence_rule`:\n"
+            "     * 'Every day' -> 'FREQ=DAILY'\n"
+            "     * 'Every weekday' -> 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'\n"
             "     * 'Every Monday' -> 'FREQ=WEEKLY;BYDAY=MO'\n"
             "     * 'Every 2 weeks on Tuesday' -> 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU'\n"
             "     * 'Monthly' -> 'FREQ=MONTHLY'\n"
-            "   - If a physical venue is mentioned, extract it into `location` and specify `travel_buffer_minutes=30`.\n"
+            "   - If a venue is mentioned, extract it into `location` and specify `travel_buffer_minutes=30`.\n"
             "   - Extract guest emails into `attendees` (e.g. ['colleague@example.com']).\n"
             "   - Set `add_google_meet=True` if the user mentions Google Meet, video call, meeting link, online sync, or invites guests.\n"
             "   - Compute start_time and end_time in IST with '+05:30' offset and call `create_event`.\n"
             "   - If `create_event` returns `conflict_detected`:\n"
             "     * Inform the user clearly: \"You already have '[Conflicting Event]' scheduled at [Time].\"\n"
-            "     * Present the alternative slots cleanly as numbered options: \"Would you like me to schedule '[New Event]' at one of these alternative times instead?\"\n"
-            "       - Option 1: [Slot 1]\n"
-            "       - Option 2: [Slot 2]\n"
-            "       - Option 3: [Slot 3]\n"
+            "     * Present alternative slots cleanly as numbered options.\n"
             "     * If user picks an alternative slot, call `create_event` with that slot.\n"
             "     * If user says 'Schedule anyway' or 'Force schedule', call `create_event` with `ignore_conflicts=True`.\n"
-            "   - If `create_event` succeeds, give a clear confirmation with:\n"
-            "     * Event title, start/end time in IST, location, and calendar event link.\n"
-            "     * If recurring, state the recurrence clearly (e.g., '🔁 Repeats: Every weekday (Mon–Fri)').\n"
-            "     * If a travel buffer was created, mention it: '🚗 Travel Buffer added: [Time]'.\n"
-            "     * If a Google Meet link was created, display it as a clickable link: '[📹 Join with Google Meet](MEET_URL)'.\n"
-            "     * If attendees were invited, mention them: 'Invites sent to: [emails]'.\n"
-            "     * Include delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "   - If `create_event` succeeds, give a clear confirmation with event title, start/end time in IST, recurrence/travel buffer (if any), Google Meet link (if any), attendees, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
             "3. When user asks to edit, move, reschedule, extend, or rename an event:\n"
             "   - Call `update_calendar_event` with summary_search='...' and new fields.\n"
             "   - Compute any new datetimes in IST ('Asia/Kolkata' +05:30).\n"
             "   - Confirm the modification in 1 short sentence with the updated event title, new time in IST, and delete button.\n"
-            "4. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
+            "4. When user asks to cancel, delete, or clean up events:\n"
+            "   - For single or specific event deletion (e.g., 'Cancel my 3 PM meeting today', 'Delete Team Sync'):\n"
+            "     * Call `delete_calendar_events` directly with summary or event_id and confirm in 1 sentence.\n"
+            "   - For bulk deletion requests (e.g., 'Clear all my meetings for this Friday', 'Delete all events next week'):\n"
+            "     * FIRST call `list_events` with the relevant time range (e.g., time_min and time_max for that day in IST) to retrieve matching events.\n"
+            "     * If MORE THAN 3 events match: List the matching events (title and time) and ask for user confirmation before deleting.\n"
+            "     * If user confirms or <= 3 events found: Call `delete_calendar_events` with `event_ids=[...]` and confirm the count of deleted events in IST.\n"
             "5. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
         )
 
