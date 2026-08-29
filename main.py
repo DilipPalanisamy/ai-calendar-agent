@@ -590,22 +590,21 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "5. Format output using clean Markdown, bullet points, and nice styling. Include clickable links if available."
         )
 
-        # 3. Initialize Gemini LLM with bound tools
-        configured_model = (os.getenv("GEMINI_MODEL") or "gemini-2.0-flash").strip()
+        # 3. Initialize Gemini LLM with bound tools (Google active models)
+        configured_model = (os.getenv("GEMINI_MODEL") or "gemini-3.6-flash").strip()
         raw_candidates = [
             configured_model,
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-2.0-flash-exp",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro",
-            "gemini-pro",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-pro-preview",
+            "gemini-3.6-pro",
         ]
-        invalid_names = {"gemini-2.5-flash", "models/gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash"}
+        legacy_deprecated = {"gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest", "gemini-pro", "models/gemini-pro"}
         unique_candidates = []
         for cand in raw_candidates:
             cand_clean = cand.removeprefix("models/").strip()
-            if cand_clean and cand_clean not in invalid_names and cand_clean not in unique_candidates:
+            if cand_clean and cand_clean not in legacy_deprecated and cand_clean not in unique_candidates:
                 unique_candidates.append(cand_clean)
 
         # 4. Multi-turn Agent Execution Loop with Model Fallback
