@@ -1030,6 +1030,39 @@
             50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
         }
 
+        .btn-mic {
+            width: var(--touch-target);
+            height: var(--touch-target);
+            border-radius: 50%;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+
+        .btn-mic:hover, .btn-mic:active {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-mic.listening {
+            background: #ef4444 !important;
+            color: #ffffff !important;
+            animation: micPulse 1.5s infinite ease-in-out;
+        }
+
+        @keyframes micPulse {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); transform: scale(1); }
+            50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); transform: scale(1.06); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); transform: scale(1); }
+        }
+
         /* ----------------------------------------------------
            Mobile Overlay & Media Queries
            ---------------------------------------------------- */
@@ -1235,14 +1268,17 @@
                 </div>
             </div>
 
-            <!-- Input Bar with Send & Stop Generating Button -->
+            <!-- Input Bar with Voice Recognition, Send & Stop Generating Button -->
             <div class="chat-input-area">
                 <div class="input-wrapper">
                     <textarea 
                         id="chat-input" 
                         class="chat-input" 
-                        placeholder="Message AI Calendar Agent..." 
+                        placeholder="Message AI Calendar Agent or use voice..." 
                         rows="1"></textarea>
+                    <button class="btn-mic" id="mic-btn" title="Voice Input (Click to Speak)" aria-label="Voice Input">
+                        <i class="fa-solid fa-microphone"></i>
+                    </button>
                     <button class="btn-send" id="btn-send" title="Send Message" aria-label="Send Message">
                         <i class="fa-solid fa-paper-plane"></i>
                     </button>
@@ -1271,6 +1307,7 @@
         const welcomeScreen = document.getElementById('welcome-screen');
         const chatMessages = document.getElementById('chat-messages');
         const chatInput = document.getElementById('chat-input');
+        const btnMic = document.getElementById('mic-btn');
         const btnSend = document.getElementById('btn-send');
         const currentChatTitle = document.getElementById('current-chat-title');
 
@@ -1800,6 +1837,102 @@
         }
 
         clearAllHistoryBtn.addEventListener('click', clearAllHistory);
+
+        // ----------------------------------------------------
+        // Speech-to-Text Voice Command Integration (Web Speech API)
+        // ----------------------------------------------------
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let isListening = false;
+        let shouldAutoSend = false;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = navigator.language || 'en-US';
+
+            recognition.onstart = () => {
+                isListening = true;
+                btnMic.classList.add('listening');
+                btnMic.innerHTML = '<i class="fa-solid fa-microphone-lines"></i>';
+                btnMic.setAttribute('title', 'Listening... (Click to stop)');
+                chatInput.setAttribute('placeholder', 'Listening... speak your command now');
+            };
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                if (interimTranscript) {
+                    chatInput.value = interimTranscript;
+                    chatInput.style.height = 'auto';
+                    chatInput.style.height = Math.min(chatInput.scrollHeight, 110) + 'px';
+                }
+
+                if (finalTranscript) {
+                    chatInput.value = finalTranscript;
+                    chatInput.style.height = 'auto';
+                    chatInput.style.height = Math.min(chatInput.scrollHeight, 110) + 'px';
+                    shouldAutoSend = true;
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Speech Recognition Error:", event.error);
+                if (event.error === 'not-allowed') {
+                    showNotification("⚠️ Microphone access blocked. Please allow microphone permissions in your browser.");
+                } else if (event.error !== 'no-speech') {
+                    showNotification(`⚠️ Voice error: ${event.error}`);
+                }
+                resetMicUI();
+            };
+
+            recognition.onend = () => {
+                resetMicUI();
+                if (shouldAutoSend && chatInput.value.trim()) {
+                    shouldAutoSend = false;
+                    sendMessage();
+                }
+            };
+
+            function resetMicUI() {
+                isListening = false;
+                btnMic.classList.remove('listening');
+                btnMic.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+                btnMic.setAttribute('title', 'Voice Input (Click to Speak)');
+                chatInput.setAttribute('placeholder', 'Message AI Calendar Agent or use voice...');
+            }
+
+            btnMic.addEventListener('click', () => {
+                if (isListening) {
+                    recognition.stop();
+                } else {
+                    if (isProcessing && currentAbortController) {
+                        stopGeneration();
+                    }
+                    try {
+                        shouldAutoSend = false;
+                        recognition.start();
+                    } catch (err) {
+                        console.warn("Speech recognition start warning:", err);
+                    }
+                }
+            });
+        } else {
+            // Fallback for browsers without Web Speech API
+            btnMic.addEventListener('click', () => {
+                showNotification("🎙️ Voice speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.");
+            });
+        }
 
         // ----------------------------------------------------
         // Send Message Handler with AbortController Support
