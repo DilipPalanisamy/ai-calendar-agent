@@ -1,10 +1,12 @@
 import os
+import re
 import json
 import uuid
 import sqlite3
 import asyncio
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -59,6 +61,31 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 SECRET_KEY = os.getenv("SECRET_KEY", "ai-calendar-agent-secret-key-production-ready-2026")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
 CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "Asia/Kolkata")
+
+
+def normalize_iso_datetime(dt_str: str, default_tz_name: str = CALENDAR_TIMEZONE) -> str:
+    """Ensures ISO datetime string includes the explicit Indian Standard Time (+05:30) offset."""
+    if not dt_str:
+        return dt_str
+    dt_str = str(dt_str).strip()
+
+    # If format is already with timezone offset (e.g. +05:30 or -04:00), return as is
+    if re.search(r"[+-]\d{2}:\d{2}$", dt_str):
+        return dt_str
+
+    if dt_str.endswith("Z"):
+        dt_str = dt_str[:-1]
+
+    try:
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo(default_tz_name))
+        return dt.isoformat()
+    except Exception:
+        # Fallback appending offset if simple YYYY-MM-DDTHH:MM:SS
+        if "T" in dt_str and len(dt_str) >= 16 and not dt_str.endswith("+05:30"):
+            return f"{dt_str}+05:30"
+        return dt_str
 
 # Google OAuth 2.0 Scopes required for Calendar & Gmail
 SCOPES = [
@@ -381,7 +408,9 @@ async def list_events_tool(creds: Credentials, time_min: Optional[str] = None, m
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
         if not time_min:
-            time_min = datetime.now(timezone.utc).isoformat()
+            time_min = datetime.now(ZoneInfo(CALENDAR_TIMEZONE)).isoformat()
+        else:
+            time_min = normalize_iso_datetime(time_min)
 
         events_result = await asyncio.to_thread(
             service.events()
@@ -436,9 +465,13 @@ async def create_event_tool(
     location: str = "",
     attendees: Optional[List[str]] = None,
 ) -> str:
-    """Creates a new event on user's primary Google Calendar after asynchronous conflict checking."""
+    """Creates a new event on user's primary Google Calendar after asynchronous conflict checking in IST."""
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
+
+        # Normalize start_time and end_time to ensure explicit Indian Standard Time (+05:30) offset
+        norm_start = normalize_iso_datetime(start_time)
+        norm_end = normalize_iso_datetime(end_time)
 
         # Conflict checking in the target time window asynchronously
         conflict_msg = ""
@@ -447,8 +480,8 @@ async def create_event_tool(
                 service.events()
                 .list(
                     calendarId="primary",
-                    timeMin=start_time if "T" in start_time else f"{start_time}T00:00:00Z",
-                    timeMax=end_time if "T" in end_time else f"{end_time}T23:59:59Z",
+                    timeMin=norm_start,
+                    timeMax=norm_end,
                     singleEvents=True,
                 )
                 .execute
@@ -460,12 +493,18 @@ async def create_event_tool(
         except Exception as check_err:
             logger.warning(f"Conflict check warning: {check_err}")
 
-        # Construct event payload
+        # Construct event payload with explicit timeZone set to Asia/Kolkata
         event_body: Dict[str, Any] = {
             "summary": summary,
             "description": description or "Scheduled via AI Calendar Agent",
-            "start": {"dateTime": start_time, "timeZone": CALENDAR_TIMEZONE},
-            "end": {"dateTime": end_time, "timeZone": CALENDAR_TIMEZONE},
+            "start": {
+                "dateTime": norm_start,
+                "timeZone": CALENDAR_TIMEZONE,  # 👈 Forces IST interpretation ('Asia/Kolkata')
+            },
+            "end": {
+                "dateTime": norm_end,
+                "timeZone": CALENDAR_TIMEZONE,  # 👈 Forces IST interpretation ('Asia/Kolkata')
+            },
         }
 
         if location:
@@ -483,8 +522,9 @@ async def create_event_tool(
             "message": f"Successfully created event: '{summary}'",
             "event_id": created_event.get("id"),
             "htmlLink": created_event.get("htmlLink"),
-            "start": start_time,
-            "end": end_time,
+            "start": norm_start,
+            "end": norm_end,
+            "timeZone": CALENDAR_TIMEZONE,
             "location": location,
             "conflict_warning": conflict_msg if conflict_msg else None,
         }
@@ -1049,8 +1089,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     await asyncio.to_thread(save_chat_message, session_id, "user", user_message, active_email)
 
     try:
-        now_dt = datetime.now(timezone.utc).astimezone()
-        current_time_str = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+        local_tz = ZoneInfo(CALENDAR_TIMEZONE)
+        now_dt = datetime.now(local_tz)
+        current_time_str = now_dt.strftime("%Y-%m-%d %I:%M %p %Z")
         current_iso_str = now_dt.isoformat()
 
         # 2. Async Wrappers for Tools
@@ -1098,7 +1139,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             StructuredTool.from_function(
                 coroutine=create_event_wrapper,
                 name="create_event",
-                description="Create Google Calendar event. start_time and end_time must be ISO 8601 strings.",
+                description="Create Google Calendar event in Indian Standard Time (IST). start_time and end_time must be ISO 8601 strings.",
             ),
             StructuredTool.from_function(
                 coroutine=delete_calendar_event_wrapper,
@@ -1114,20 +1155,22 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         tool_map = {t.name: t for t in tools}
 
-        # 3. Speed-Focused Concise System Instructions
+        # 3. Speed-Focused System Instructions with Explicit Indian Standard Time (IST)
         system_prompt = (
             "System Directive: You are a high-speed calendar AI assistant. Be extremely concise, direct, and brief. "
-            "Perform tool calls immediately without conversational filler or lengthy intros/outros. "
-            "Provide short confirmations with direct links and action buttons.\n\n"
+            f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
+            f"All relative and absolute times mentioned by the user MUST be interpreted in IST ('{CALENDAR_TIMEZONE}'). "
+            "Perform tool calls immediately without conversational filler or lengthy intros/outros.\n\n"
             f"Active Account: {active_email}\n"
-            f"Current DateTime: {current_time_str} (ISO: {current_iso_str})\n"
-            f"Default Timezone: {CALENDAR_TIMEZONE}\n\n"
+            f"Current Local DateTime: {current_time_str} (ISO: {current_iso_str})\n"
+            f"Default Timezone: {CALENDAR_TIMEZONE} (UTC+5:30)\n\n"
             "Instructions:\n"
-            "1. When user asks about schedule or availability, call `list_events`.\n"
-            "2. When user asks to create an event, calculate ISO start_time/end_time and call `create_event`. Give a 1-sentence confirmation with clickable link and delete button.\n"
-            "3. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
-            "4. When creating or listing events, include the delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
-            "5. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
+            "1. When user asks about schedule or availability, call `list_events` with time_min relative to Current Local DateTime.\n"
+            "2. When user asks to create/schedule an event (e.g., '3 PM meeting tomorrow'), compute start_time and end_time in IST with '+05:30' offset (e.g., '2026-08-30T15:00:00+05:30') and call `create_event`.\n"
+            "3. Give a 1-sentence confirmation with the event title, start/end time in IST, clickable link, and delete button.\n"
+            "4. When user asks to delete/cancel an event, call `delete_calendar_event` and confirm in 1 short sentence.\n"
+            "5. When creating or listing events, include the delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "6. When checking emails, call `check_gmail_invites` and summarize briefly in 1-2 bullet points."
         )
 
         # 4. Initialize Gemini LLM with active Google AI models
