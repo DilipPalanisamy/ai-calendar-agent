@@ -1859,68 +1859,99 @@
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         let isListening = false;
-        let shouldAutoSend = false;
+        let initialInputPrefix = '';
+        let silenceTimer = null;
 
         if (SpeechRecognition) {
             recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = true;
-            recognition.lang = navigator.language || 'en-US';
+            recognition.continuous = true;       // Keep listening across natural pauses
+            recognition.interimResults = true;    // Show live transcript in real-time
+            
+            // Prefer English dialect from browser or default to en-IN / en-US
+            const detectedLang = navigator.language || 'en-IN';
+            recognition.lang = detectedLang.toLowerCase().startsWith('en') ? detectedLang : 'en-IN';
+
+            function clearSilenceTimer() {
+                if (silenceTimer) {
+                    clearTimeout(silenceTimer);
+                    silenceTimer = null;
+                }
+            }
+
+            function restartSilenceTimer() {
+                clearSilenceTimer();
+                // Auto-stop after 3.5 seconds of quiet
+                silenceTimer = setTimeout(() => {
+                    if (isListening && recognition) {
+                        try {
+                            recognition.stop();
+                        } catch (e) {}
+                    }
+                }, 3500);
+            }
 
             recognition.onstart = () => {
                 isListening = true;
+                initialInputPrefix = chatInput.value.trim();
                 btnMic.classList.add('listening');
                 btnMic.innerHTML = '<i class="fa-solid fa-microphone-lines"></i>';
-                btnMic.setAttribute('title', 'Listening... (Click to stop)');
-                chatInput.setAttribute('placeholder', 'Listening... speak your command now');
+                btnMic.setAttribute('title', 'Listening... (Click to Finish)');
+                chatInput.setAttribute('placeholder', '🎙️ Listening... speak naturally (e.g. Schedule meeting tomorrow at 3 PM)');
+                restartSilenceTimer();
             };
 
             recognition.onresult = (event) => {
-                let interimTranscript = '';
-                let finalTranscript = '';
+                restartSilenceTimer();
 
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                let fullFinalTranscript = '';
+                let interimTranscript = '';
+
+                // Iterate through all results to prevent losing earlier speech chunks
+                for (let i = 0; i < event.results.length; ++i) {
+                    const segment = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
+                        fullFinalTranscript += (fullFinalTranscript ? ' ' : '') + segment.trim();
                     } else {
-                        interimTranscript += event.results[i][0].transcript;
+                        interimTranscript += (interimTranscript ? ' ' : '') + segment.trim();
                     }
                 }
 
+                let combinedTranscript = fullFinalTranscript;
                 if (interimTranscript) {
-                    chatInput.value = interimTranscript;
-                    chatInput.style.height = 'auto';
-                    chatInput.style.height = Math.min(chatInput.scrollHeight, 110) + 'px';
+                    combinedTranscript = combinedTranscript ? `${combinedTranscript} ${interimTranscript}` : interimTranscript;
                 }
 
-                if (finalTranscript) {
-                    chatInput.value = finalTranscript;
+                if (combinedTranscript) {
+                    const prefix = initialInputPrefix ? `${initialInputPrefix} ` : '';
+                    chatInput.value = prefix + combinedTranscript;
                     chatInput.style.height = 'auto';
                     chatInput.style.height = Math.min(chatInput.scrollHeight, 110) + 'px';
-                    shouldAutoSend = true;
                 }
             };
 
             recognition.onerror = (event) => {
-                console.error("Speech Recognition Error:", event.error);
+                clearSilenceTimer();
+                console.warn("Speech Recognition Event:", event.error);
                 if (event.error === 'not-allowed') {
-                    showNotification("⚠️ Microphone access blocked. Please allow microphone permissions in your browser.");
-                } else if (event.error !== 'no-speech') {
-                    showNotification(`⚠️ Voice error: ${event.error}`);
+                    showNotification("⚠️ Microphone access blocked. Please allow microphone permissions in your browser address bar.");
+                } else if (event.error === 'audio-capture') {
+                    showNotification("⚠️ No microphone was found. Please check your audio input device.");
+                } else if (event.error === 'network') {
+                    showNotification("⚠️ Voice recognition network issue. Please check your internet connection.");
+                } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                    showNotification(`⚠️ Voice recognition: ${event.error}`);
                 }
                 resetMicUI();
             };
 
             recognition.onend = () => {
+                clearSilenceTimer();
                 resetMicUI();
-                if (shouldAutoSend && chatInput.value.trim()) {
-                    shouldAutoSend = false;
-                    sendMessage();
-                }
             };
 
             function resetMicUI() {
                 isListening = false;
+                clearSilenceTimer();
                 btnMic.classList.remove('listening');
                 btnMic.innerHTML = '<i class="fa-solid fa-microphone"></i>';
                 btnMic.setAttribute('title', 'Voice Input (Click to Speak)');
@@ -1929,16 +1960,27 @@
 
             btnMic.addEventListener('click', () => {
                 if (isListening) {
-                    recognition.stop();
+                    try {
+                        recognition.stop();
+                    } catch (err) {
+                        resetMicUI();
+                    }
                 } else {
                     if (isProcessing && currentAbortController) {
                         stopGeneration();
                     }
                     try {
-                        shouldAutoSend = false;
                         recognition.start();
                     } catch (err) {
-                        console.warn("Speech recognition start warning:", err);
+                        console.warn("Speech recognition restart catch:", err);
+                        try {
+                            recognition.stop();
+                            setTimeout(() => {
+                                try { recognition.start(); } catch (e) { resetMicUI(); }
+                            }, 200);
+                        } catch (e2) {
+                            resetMicUI();
+                        }
                     }
                 }
             });
