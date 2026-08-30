@@ -31,6 +31,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from parser import get_gemini_model_candidates
+from gemini_resilience import acall_gemini_with_retry, call_gemini_with_retry
 
 # ---------------------------------------------------------------------------
 # 1. Environment & Path Setup
@@ -1775,7 +1776,12 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                         logger.info(f"Client disconnected for user '{active_email}'. Cancelling AI generation.")
                         return JSONResponse({"status": "cancelled", "message": "Request cancelled by user."}, status_code=200)
 
-                    response = await llm_with_tools.ainvoke(messages)
+                    response = await acall_gemini_with_retry(
+                        llm_with_tools.ainvoke,
+                        messages,
+                        max_retries=5,
+                        initial_delay=2.0,
+                    )
                     messages.append(response)
 
                     if not response.tool_calls:

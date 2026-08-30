@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+from gemini_resilience import call_gemini_with_retry
 
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
@@ -259,7 +260,7 @@ def parse_schedule_message(message_text: str, user_timezone: str | None = None) 
     """
 
     try:
-        parsed = structured_llm.invoke(prompt)
+        parsed = call_gemini_with_retry(structured_llm.invoke, prompt, max_retries=5, initial_delay=2.0)
         if isinstance(parsed, MultiCalendarEvents):
             return parsed
         if isinstance(parsed, CalendarEvent):
