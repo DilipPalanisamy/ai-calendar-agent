@@ -80,6 +80,22 @@ def test_endpoints():
     assert res_cal_del.status_code == 401, f"Expected 401 Unauthorized, got {res_cal_del.status_code}"
     print("[PASS] POST /api/calendar/delete (401 Unauthorized)", flush=True)
 
+    print("Testing GET /auth/login (Redirect to Google with access_type=offline & prompt=consent)...", flush=True)
+    res_auth_login = client.get("/auth/login", follow_redirects=False)
+    assert res_auth_login.status_code == 303, f"Expected 303, got {res_auth_login.status_code}"
+    loc = res_auth_login.headers.get("location", "")
+    assert "access_type=offline" in loc, f"Expected access_type=offline in auth url: {loc}"
+    assert "prompt=consent" in loc, f"Expected prompt=consent in auth url: {loc}"
+    print("[PASS] GET /auth/login (Enforces access_type=offline and prompt=consent)", flush=True)
+
+    print("Testing GET /auth/add-account (Redirect to Google with access_type=offline & prompt=consent)...", flush=True)
+    res_add_acc = client.get("/auth/add-account", follow_redirects=False)
+    assert res_add_acc.status_code == 303, f"Expected 303, got {res_add_acc.status_code}"
+    loc_add = res_add_acc.headers.get("location", "")
+    assert "access_type=offline" in loc_add, f"Expected access_type=offline in auth url: {loc_add}"
+    assert "prompt=" in loc_add and "consent" in loc_add, f"Expected consent in prompt: {loc_add}"
+    print("[PASS] GET /auth/add-account (Enforces access_type=offline and prompt=consent)", flush=True)
+
     print("Testing GET /logout (Redirect to /login)...", flush=True)
     res_logout = client.get("/logout", follow_redirects=False)
     assert res_logout.status_code == 303, f"Expected 303 See Other, got {res_logout.status_code}"
