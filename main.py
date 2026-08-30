@@ -845,12 +845,15 @@ async def create_event_tool(
         if buffer_info:
             msg_parts.append(f"with an automated {buffer_minutes}-minute travel buffer (🚗 {buf_start_dt.strftime('%I:%M %p')} - {buf_end_dt.strftime('%I:%M %p')})")
 
+        cal_html_link = created_event.get("htmlLink") or "https://calendar.google.com/calendar/u/0/r"
+
         result = {
             "status": "success",
             "message": " ".join(msg_parts),
             "event_id": created_event.get("id"),
-            "htmlLink": created_event.get("htmlLink"),
-            "google_meet_link": meet_link,
+            "htmlLink": cal_html_link,
+            "google_calendar_link": cal_html_link,
+            "google_meet_link": meet_link if add_google_meet else None,
             "attendees": attendees if attendees else [],
             "location": location,
             "color": color,
@@ -1767,14 +1770,14 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "     * 'Monthly' -> 'FREQ=MONTHLY'\n"
             "   - If a venue is mentioned, extract it into `location` and specify `travel_buffer_minutes=30`.\n"
             "   - Extract guest emails into `attendees` (e.g. ['colleague@example.com']).\n"
-            "   - Set `add_google_meet=True` if the user mentions Google Meet, video call, meeting link, online sync, or invites guests.\n"
+            "   - ONLY set `add_google_meet=True` if the user explicitly asks for Google Meet or a video call (e.g. 'with Google Meet', 'with video link'). For normal meetings, hangouts, or syncs, leave `add_google_meet=False`.\n"
             "   - Compute start_time and end_time in IST with '+05:30' offset and call `create_event`.\n"
             "   - If `create_event` returns `conflict_detected`:\n"
             "     * Inform the user clearly: \"You already have '[Conflicting Event]' scheduled at [Time].\"\n"
             "     * Present alternative slots cleanly as numbered options.\n"
             "     * If user picks an alternative slot, call `create_event` with that slot.\n"
             "     * If user says 'Schedule anyway' or 'Force schedule', call `create_event` with `ignore_conflicts=True`.\n"
-            "   - If `create_event` succeeds, give a clear confirmation with event title, start/end time in IST, location/color (if any), recurrence/travel buffer (if any), Google Meet link (if any), attendees, and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
+            "   - If `create_event` succeeds, give a clear confirmation with event title, start/end time in IST, location/color (if any), recurrence/travel buffer (if any), attendees (if any), Google Meet link (ONLY if explicitly requested), direct Google Calendar link `[📅 View in Google Calendar](HTML_LINK)` (using the `htmlLink` from tool result), and delete button: `<button class=\"btn-delete-event\" data-event-id=\"EVENT_ID\"><i class=\"fa-solid fa-trash-can\"></i> Delete</button>`.\n"
             "3. When user asks to edit, move, reschedule, extend, color, or rename an event:\n"
             "   - Call `update_calendar_event` with summary_search='...' and modified fields (new_title, new_color, new_start_datetime, new_end_datetime, etc.).\n"
             "   - Compute any new datetimes in IST ('Asia/Kolkata' +05:30).\n"
