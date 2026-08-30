@@ -1449,9 +1449,16 @@
             messageRow.className = `message-row ${sender}`;
 
             if (sender === 'assistant') {
-                const cleanHtml = DOMPurify.sanitize(marked.parse(rawString), {
+                const renderer = new marked.Renderer();
+                renderer.link = function(href, title, text) {
+                    const linkHref = typeof href === 'object' && href !== null ? (href.href || '') : String(href || '');
+                    const linkTitle = typeof href === 'object' && href !== null ? (href.title || '') : (title || '');
+                    const linkText = typeof href === 'object' && href !== null ? (href.text || '') : (text || '');
+                    return `<a href="${linkHref}" target="_blank" rel="noopener noreferrer"${linkTitle ? ` title="${linkTitle}"` : ''}>${linkText}</a>`;
+                };
+                const cleanHtml = DOMPurify.sanitize(marked.parse(rawString, { renderer: renderer }), {
                     ADD_TAGS: ['button', 'i', 'span'],
-                    ADD_ATTR: ['onclick', 'data-event-id', 'class', 'target']
+                    ADD_ATTR: ['onclick', 'data-event-id', 'class', 'target', 'rel']
                 });
                 messageRow.innerHTML = `
                     <div class="message-avatar assistant">
@@ -1549,7 +1556,10 @@
 
                 const data = await res.json();
                 if (res.ok && data.status === 'success') {
-                    showNotification("✅ Event deleted from your Google Calendar!");
+                    const notifyMsg = (data.deleted_travel_buffers && data.deleted_travel_buffers.length > 0)
+                        ? "✅ Event and automated travel buffer deleted from Google Calendar!"
+                        : "✅ Event deleted from your Google Calendar!";
+                    showNotification(notifyMsg);
                     if (btn) {
                         btn.innerHTML = '<i class="fa-solid fa-check"></i> Deleted';
                         btn.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';

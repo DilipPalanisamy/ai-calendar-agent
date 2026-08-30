@@ -264,17 +264,161 @@ def find_event_by_title(title_query: str, time_min_iso: str = None) -> dict:
     return items[0] if items else None
 
 
+def find_linked_travel_buffer_ids(service, calendar_id: str, event_id: str, event_data: dict = None) -> list:
+    """
+    Finds all associated travel buffer event IDs for a given Google Calendar event.
+    Checks:
+    1. extendedProperties (travel_buffer_event_id on main event or parent_event_id on travel buffer)
+    2. Description metadata tags ([Event ID: ...] or [Travel Buffer ID: ...])
+    3. Heuristic time-window search for events ending at main event start time with '🚗 Travel to ...' or target summary in description.
+    """
+    linked_ids = []
+    if not event_id and not event_data:
+        return linked_ids
+
+    # 1. Fetch event data if not already passed
+    if event_data is None:
+        try:
+            event_data = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+        except Exception:
+            event_data = None
+
+    if not event_data:
+        return linked_ids
+
+    current_event_id = event_data.get("id") or event_id
+    summary = event_data.get("summary", "").strip()
+    description = event_data.get("description", "")
+    location = event_data.get("location", "").strip()
+    ext_props = event_data.get("extendedProperties", {})
+    private_props = ext_props.get("private", {}) if isinstance(ext_props, dict) else {}
+
+    # Check 1: Direct link in extendedProperties
+    direct_travel_id = private_props.get("travel_buffer_event_id")
+    if direct_travel_id and direct_travel_id != current_event_id and direct_travel_id not in linked_ids:
+        linked_ids.append(direct_travel_id)
+
+    # Check 2: Direct link in description
+    match_buf_desc = re.search(r"\[Travel Buffer ID:\s*([^\]]+)\]", description)
+    if match_buf_desc:
+        buf_id_desc = match_buf_desc.group(1).strip()
+        if buf_id_desc and buf_id_desc not in linked_ids and buf_id_desc != current_event_id:
+            linked_ids.append(buf_id_desc)
+
+    # Check 3: Search surrounding calendar events around start time
+    start_raw = event_data.get("start", {}).get("dateTime") or event_data.get("start", {}).get("date")
+    if start_raw:
+        try:
+            start_clean = str(start_raw).strip()
+            if start_clean.endswith("Z"):
+                start_dt = datetime.datetime.fromisoformat(start_clean.replace("Z", "+00:00"))
+            elif len(start_clean) > 10 and ("+" in start_clean[10:] or "-" in start_clean[10:]):
+                start_dt = datetime.datetime.fromisoformat(start_clean)
+            else:
+                tz_name = get_primary_calendar_timezone(service)
+                start_dt = datetime.datetime.fromisoformat(start_clean).replace(tzinfo=ZoneInfo(tz_name))
+
+            search_min = (start_dt - datetime.timedelta(hours=3)).astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+            search_max = (start_dt + datetime.timedelta(minutes=5)).astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+            nearby_events = service.events().list(
+                calendarId=calendar_id,
+                timeMin=search_min,
+                timeMax=search_max,
+                singleEvents=True,
+                maxResults=25
+            ).execute().get("items", [])
+
+            for item in nearby_events:
+                cand_id = item.get("id")
+                if not cand_id or cand_id == current_event_id or cand_id in linked_ids:
+                    continue
+
+                cand_ext = item.get("extendedProperties", {}).get("private", {}) if isinstance(item.get("extendedProperties"), dict) else {}
+                cand_desc = item.get("description", "")
+                cand_summary = item.get("summary", "")
+                cand_end_raw = item.get("end", {}).get("dateTime") or item.get("end", {}).get("date")
+
+                if cand_ext.get("parent_event_id") == current_event_id or cand_ext.get("travel_for_event_id") == current_event_id:
+                    linked_ids.append(cand_id)
+                    continue
+
+                if f"[Event ID: {current_event_id}]" in cand_desc:
+                    linked_ids.append(cand_id)
+                    continue
+
+                is_travel_named = cand_summary.startswith("🚗 Travel") or cand_summary.startswith("Travel to") or cand_ext.get("is_travel_buffer") == "true"
+                if is_travel_named and cand_end_raw:
+                    try:
+                        cand_end_clean = str(cand_end_raw).strip()
+                        if cand_end_clean.endswith("Z"):
+                            cand_end_dt = datetime.datetime.fromisoformat(cand_end_clean.replace("Z", "+00:00"))
+                        elif len(cand_end_clean) > 10 and ("+" in cand_end_clean[10:] or "-" in cand_end_clean[10:]):
+                            cand_end_dt = datetime.datetime.fromisoformat(cand_end_clean)
+                        else:
+                            cand_end_dt = datetime.datetime.fromisoformat(cand_end_clean).replace(tzinfo=start_dt.tzinfo)
+
+                        time_diff = abs((cand_end_dt - start_dt).total_seconds())
+                        if time_diff <= 120:
+                            if summary and f"before '{summary}'" in cand_desc:
+                                linked_ids.append(cand_id)
+                            elif summary and summary.lower() in cand_desc.lower():
+                                linked_ids.append(cand_id)
+                            elif location and location.lower() in cand_summary.lower():
+                                linked_ids.append(cand_id)
+                            elif cand_summary.startswith("🚗 Travel"):
+                                linked_ids.append(cand_id)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    return linked_ids
+
+
 def delete_google_calendar_event(event_id: str) -> bool:
-    """Deletes an event from Google Calendar by ID."""
+    """Deletes an event and any associated travel buffer from Google Calendar by ID."""
     service = get_calendar_service()
     try:
+        travel_buffer_ids = find_linked_travel_buffer_ids(service, "primary", event_id)
         service.events().delete(calendarId='primary', eventId=event_id).execute()
+        for tid in travel_buffer_ids:
+            try:
+                service.events().delete(calendarId='primary', eventId=tid).execute()
+            except Exception:
+                pass
         return True
     except Exception:
         return False
 
 
-def reschedule_google_calendar_event(event_id: str, new_start_iso: str, new_end_iso: str) -> str:
+def format_google_calendar_link(raw_link: str = None, user_email: str = None) -> str:
+    """
+    Ensures Google Calendar URLs point accurately to the specific authenticated Google account
+    by appending the authuser parameter.
+    """
+    clean_email = (user_email or "").strip().lower()
+
+    if not raw_link:
+        if clean_email:
+            return f"https://calendar.google.com/calendar/r?authuser={clean_email}"
+        return "https://calendar.google.com/calendar/r"
+
+    link = raw_link.strip()
+
+    if clean_email:
+        if "authuser=" in link:
+            link = re.sub(r"[?&]authuser=[^&#]+", "", link)
+            sep = "&" if "?" in link else "?"
+            link = f"{link}{sep}authuser={clean_email}"
+        else:
+            sep = "&" if "?" in link else "?"
+            link = f"{link}{sep}authuser={clean_email}"
+
+    return link
+
+
+def reschedule_google_calendar_event(event_id: str, new_start_iso: str, new_end_iso: str, user_email: str = None) -> str:
     """Updates start and end time of an existing Google Calendar event."""
     service = get_calendar_service()
     calendar_timezone = get_primary_calendar_timezone(service)
@@ -289,11 +433,11 @@ def reschedule_google_calendar_event(event_id: str, new_start_iso: str, new_end_
     event['end']['timeZone'] = calendar_timezone
 
     updated_event = service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
-    return updated_event.get('htmlLink')
+    return format_google_calendar_link(updated_event.get('htmlLink'), user_email)
 
 
-def create_google_calendar_event(event):
-    """Creates a new event on Google Calendar with localized RFC3339 timestamps."""
+def create_google_calendar_event(event, user_email: str = None):
+    """Creates a new event on Google Calendar with localized RFC3339 timestamps and automated travel buffer if location is specified."""
     # If a MultiCalendarEvents wrapper was passed, take the first event
     if hasattr(event, 'events') and event.events:
         event = event.events[0]
@@ -304,9 +448,35 @@ def create_google_calendar_event(event):
     start_dt = _format_rfc3339_with_tz(event.start_time, calendar_timezone)
     end_dt = _format_rfc3339_with_tz(event.end_time, calendar_timezone)
 
+    location = getattr(event, 'location', 'Not specified')
+    has_valid_location = bool(location and location.strip() and location.strip().lower() not in ['not specified', 'none', 'n/a'])
+
+    buffer_id = None
+    if has_valid_location:
+        try:
+            req_start_dt = datetime.datetime.fromisoformat(start_dt)
+            buf_start_dt = req_start_dt - datetime.timedelta(minutes=30)
+            buffer_body = {
+                'summary': f"🚗 Travel to {location.strip()}",
+                'description': f"Automated 30-minute travel buffer before '{event.event_name}'.",
+                'start': {'dateTime': buf_start_dt.isoformat(), 'timeZone': calendar_timezone},
+                'end': {'dateTime': req_start_dt.isoformat(), 'timeZone': calendar_timezone},
+                'colorId': '5',  # Yellow in Google Calendar
+                'extendedProperties': {
+                    'private': {
+                        'is_travel_buffer': 'true',
+                        'target_summary': event.event_name,
+                    }
+                }
+            }
+            created_buf = service.events().insert(calendarId='primary', body=buffer_body).execute()
+            buffer_id = created_buf.get('id')
+        except Exception:
+            pass
+
     event_body = {
         'summary': event.event_name,
-        'location': getattr(event, 'location', 'Not specified'),
+        'location': location,
         'description': f'Created by AI Calendar Agent. Priority: {getattr(event, "priority", "Medium")}',
         'start': {
             'dateTime': start_dt,
@@ -317,12 +487,39 @@ def create_google_calendar_event(event):
             'timeZone': calendar_timezone,
         },
     }
+    if buffer_id:
+        event_body['extendedProperties'] = {
+            'private': {
+                'travel_buffer_event_id': buffer_id,
+                'has_travel_buffer': 'true',
+            }
+        }
 
     created_event = service.events().insert(calendarId='primary', body=event_body).execute()
-    return created_event.get('htmlLink')
+
+    if buffer_id and created_event.get('id'):
+        try:
+            service.events().patch(
+                calendarId='primary',
+                eventId=buffer_id,
+                body={
+                    'description': f"Automated 30-minute travel buffer before '{event.event_name}'. [Event ID: {created_event.get('id')}]",
+                    'extendedProperties': {
+                        'private': {
+                            'is_travel_buffer': 'true',
+                            'parent_event_id': created_event.get('id'),
+                            'target_summary': event.event_name,
+                        }
+                    }
+                }
+            ).execute()
+        except Exception:
+            pass
+
+    return format_google_calendar_link(created_event.get('htmlLink'), user_email)
 
 
-def list_google_calendar_events(start_time_iso: str, end_time_iso: str) -> list:
+def list_google_calendar_events(start_time_iso: str, end_time_iso: str, user_email: str = None) -> list:
     """Retrieves all events within a specific time window."""
     service = get_calendar_service()
     calendar_timezone = get_primary_calendar_timezone(service)
@@ -344,6 +541,6 @@ def list_google_calendar_events(start_time_iso: str, end_time_iso: str) -> list:
             "summary": item.get('summary', 'Untitled Event'),
             "start": item.get('start', {}).get('dateTime', item.get('start', {}).get('date')),
             "end": item.get('end', {}).get('dateTime', item.get('end', {}).get('date')),
-            "link": item.get('htmlLink')
+            "link": format_google_calendar_link(item.get('htmlLink'), user_email)
         })
     return events_list

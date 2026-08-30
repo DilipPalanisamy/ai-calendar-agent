@@ -32,6 +32,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from parser import get_gemini_model_candidates
 from gemini_resilience import acall_gemini_with_retry, call_gemini_with_retry
+from calendar_service import find_linked_travel_buffer_ids, format_google_calendar_link
 
 # ---------------------------------------------------------------------------
 # 1. Environment & Path Setup
@@ -459,7 +460,7 @@ def handle_google_tool_error(err: Exception, action_name: str) -> str:
 # ---------------------------------------------------------------------------
 # 5. Async & High-Performance Google Tool Functions
 # ---------------------------------------------------------------------------
-async def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_results: int = 15) -> str:
+async def list_events_tool(creds: Credentials, time_min: Optional[str] = None, max_results: int = 15, user_email: Optional[str] = None) -> str:
     """Lists upcoming events from the active Google Calendar asynchronously."""
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
@@ -491,7 +492,7 @@ async def list_events_tool(creds: Credentials, time_min: Optional[str] = None, m
             summary = ev.get("summary", "(No title)")
             location = ev.get("location", "No location specified")
             event_id = ev.get("id", "")
-            link = ev.get("htmlLink", "")
+            raw_link = ev.get("htmlLink", "")
 
             formatted_events.append({
                 "id": event_id,
@@ -499,7 +500,7 @@ async def list_events_tool(creds: Credentials, time_min: Optional[str] = None, m
                 "start": start,
                 "end": end,
                 "location": location,
-                "link": link,
+                "link": format_google_calendar_link(raw_link, user_email),
             })
 
         return json.dumps(formatted_events, indent=2)
@@ -623,6 +624,7 @@ async def create_event_tool(
     color: Optional[str] = None,
     calendar_id: str = "primary",
     ignore_conflicts: bool = False,
+    user_email: Optional[str] = None,
 ) -> str:
     """
     Creates a new event on user's Google Calendar with smart conflict detection, automated travel time buffers, Google Meet video link generation, guest invitations, color coding, and RFC 5545 recurrence rules in IST.
@@ -768,6 +770,12 @@ async def create_event_tool(
                     "timeZone": CALENDAR_TIMEZONE,
                 },
                 "colorId": "5",  # Yellow / Banana in Google Calendar
+                "extendedProperties": {
+                    "private": {
+                        "is_travel_buffer": "true",
+                        "target_summary": summary,
+                    }
+                },
             }
             try:
                 created_buf = await asyncio.to_thread(
@@ -796,6 +804,14 @@ async def create_event_tool(
                 "timeZone": CALENDAR_TIMEZONE,  # 👈 Forces IST interpretation ('Asia/Kolkata')
             },
         }
+
+        if buffer_info and buffer_info.get("event_id"):
+            event_body["extendedProperties"] = {
+                "private": {
+                    "travel_buffer_event_id": buffer_info["event_id"],
+                    "has_travel_buffer": "true",
+                }
+            }
 
         if location:
             event_body["location"] = location
@@ -835,6 +851,27 @@ async def create_event_tool(
             service.events().insert(**insert_kwargs).execute
         )
 
+        if buffer_info and buffer_info.get("event_id") and created_event.get("id"):
+            try:
+                await asyncio.to_thread(
+                    service.events().patch(
+                        calendarId=target_cal_id,
+                        eventId=buffer_info["event_id"],
+                        body={
+                            "description": f"Automated {buffer_minutes}-minute travel buffer before '{summary}'. [Event ID: {created_event.get('id')}]",
+                            "extendedProperties": {
+                                "private": {
+                                    "is_travel_buffer": "true",
+                                    "parent_event_id": created_event.get("id"),
+                                    "target_summary": summary,
+                                }
+                            }
+                        }
+                    ).execute
+                )
+            except Exception as patch_err:
+                logger.warning(f"Failed to patch travel buffer with parent_event_id: {patch_err}")
+
         meet_link = (
             created_event.get("hangoutLink")
             or created_event.get("conferenceData", {}).get("entryPoints", [{}])[0].get("uri")
@@ -845,7 +882,7 @@ async def create_event_tool(
         if buffer_info:
             msg_parts.append(f"with an automated {buffer_minutes}-minute travel buffer (🚗 {buf_start_dt.strftime('%I:%M %p')} - {buf_end_dt.strftime('%I:%M %p')})")
 
-        cal_html_link = created_event.get("htmlLink") or "https://calendar.google.com/calendar/u/0/r"
+        cal_html_link = format_google_calendar_link(created_event.get("htmlLink"), user_email)
 
         result = {
             "status": "success",
@@ -884,7 +921,7 @@ async def delete_calendar_event_tool(
     send_updates: str = "all",
 ) -> str:
     """
-    Deletes single or multiple calendar events from user's primary Google Calendar with sendUpdates='all'.
+    Deletes single or multiple calendar events and their automated travel buffers from user's primary Google Calendar with sendUpdates='all'.
     Accepts a list of event_ids, single event_id, or searches by title/summary and time range in IST.
     """
     try:
@@ -933,10 +970,17 @@ async def delete_calendar_event_tool(
 
         deleted_count = 0
         deleted_details = []
+        deleted_travel_buffers = []
         failed_errors = []
 
         for eid in target_ids:
             try:
+                # 1. Discover associated travel buffer event IDs prior to deleting
+                linked_travel_ids = await asyncio.to_thread(
+                    find_linked_travel_buffer_ids, service, "primary", eid
+                )
+
+                # 2. Delete the primary event
                 await asyncio.to_thread(
                     service.events().delete(
                         calendarId="primary",
@@ -946,15 +990,40 @@ async def delete_calendar_event_tool(
                 )
                 deleted_count += 1
                 deleted_details.append(eid)
+
+                # 3. Cascade deletion: delete any associated travel buffer event(s)
+                for tid in linked_travel_ids:
+                    if tid not in target_ids and tid not in deleted_details and tid not in deleted_travel_buffers:
+                        try:
+                            await asyncio.to_thread(
+                                service.events().delete(
+                                    calendarId="primary",
+                                    eventId=tid,
+                                    sendUpdates="none",
+                                ).execute
+                            )
+                            deleted_count += 1
+                            deleted_travel_buffers.append(tid)
+                            deleted_details.append(tid)
+                        except Exception as del_tb_err:
+                            logger.warning(f"Error deleting associated travel buffer {tid}: {del_tb_err}")
             except Exception as del_err:
                 logger.warning(f"Error deleting event {eid}: {del_err}")
                 failed_errors.append(f"ID {eid}: {str(del_err)}")
+
+        if deleted_travel_buffers:
+            msg = f"Successfully deleted {len(deleted_details) - len(deleted_travel_buffers)} event(s) and {len(deleted_travel_buffers)} automated travel buffer(s)."
+        elif deleted_count > 0:
+            msg = f"Successfully deleted {deleted_count} calendar event(s)."
+        else:
+            msg = "Failed to delete specified events."
 
         result = {
             "status": "success" if deleted_count > 0 else "error",
             "deleted_count": deleted_count,
             "deleted_event_ids": deleted_details,
-            "message": f"Successfully deleted {deleted_count} calendar event(s)." if deleted_count > 0 else "Failed to delete specified events.",
+            "deleted_travel_buffers": deleted_travel_buffers,
+            "message": msg,
             "errors": failed_errors if failed_errors else None,
         }
         return json.dumps(result, indent=2)
@@ -979,6 +1048,7 @@ async def update_calendar_event_tool(
     new_color: Optional[str] = None,
     new_description: Optional[str] = None,
     new_location: Optional[str] = None,
+    user_email: Optional[str] = None,
 ) -> str:
     """
     Updates, reschedules, moves, extends, colors, or renames an existing Google Calendar event using patch() in IST.
@@ -1118,7 +1188,7 @@ async def update_calendar_event_tool(
             "status": "success",
             "message": f"Successfully updated event: '{updated_event.get('summary')}'",
             "event_id": updated_event.get("id"),
-            "htmlLink": updated_event.get("htmlLink"),
+            "htmlLink": format_google_calendar_link(updated_event.get("htmlLink"), user_email),
             "start": start_val,
             "end": end_val,
             "timeZone": CALENDAR_TIMEZONE,
@@ -1476,7 +1546,7 @@ class DeleteEventRequest(BaseModel):
 @app.post("/api/calendar/delete")
 async def delete_calendar_event_endpoint(request: Request, body: DeleteEventRequest):
     """
-    Direct API endpoint to delete a Google Calendar event by ID
+    Direct API endpoint to delete a Google Calendar event and its associated travel buffer by ID
     using the active account's credentials.
     """
     user_creds = get_user_credentials(request)
@@ -1489,12 +1559,30 @@ async def delete_calendar_event_endpoint(request: Request, body: DeleteEventRequ
 
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=user_creds, static_discovery=False)
+
+        # Discover any associated travel buffer before deleting the primary event
+        travel_buffer_ids = await asyncio.to_thread(find_linked_travel_buffer_ids, service, "primary", event_id)
+
+        # Delete the main calendar event
         await asyncio.to_thread(service.events().delete(calendarId="primary", eventId=event_id).execute)
         logger.info(f"Direct API deleted calendar event: {event_id}")
+
+        # Cascade deletion to any linked travel buffers
+        deleted_travel_buffers = []
+        for tid in travel_buffer_ids:
+            try:
+                await asyncio.to_thread(service.events().delete(calendarId="primary", eventId=tid).execute)
+                deleted_travel_buffers.append(tid)
+                logger.info(f"Direct API deleted associated travel buffer event: {tid}")
+            except Exception as buf_del_err:
+                logger.warning(f"Failed to delete associated travel buffer {tid}: {buf_del_err}")
+
+        msg = "Event and automated travel buffer deleted successfully" if deleted_travel_buffers else "Event deleted successfully"
         return JSONResponse({
             "status": "success",
-            "message": "Event deleted successfully",
-            "event_id": event_id
+            "message": msg,
+            "event_id": event_id,
+            "deleted_travel_buffers": deleted_travel_buffers
         })
     except HttpError as err:
         logger.error(f"Google Calendar Delete API error: {err}")
@@ -1626,7 +1714,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         # 2. Async Wrappers for Tools
         async def list_events_wrapper(time_min: Optional[str] = None, max_results: int = 10) -> str:
             """Query upcoming Google Calendar events asynchronously."""
-            return await list_events_tool(user_creds, time_min=time_min, max_results=max_results)
+            return await list_events_tool(user_creds, time_min=time_min, max_results=max_results, user_email=active_email)
 
         async def create_event_wrapper(
             summary: str,
@@ -1657,6 +1745,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 color=color,
                 calendar_id=calendar_id,
                 ignore_conflicts=ignore_conflicts,
+                user_email=active_email,
             )
 
         async def update_calendar_event_wrapper(
@@ -1684,6 +1773,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 new_color=new_color,
                 new_description=new_description,
                 new_location=new_location,
+                user_email=active_email,
             )
 
         async def list_user_calendars_wrapper() -> str:
@@ -1784,7 +1874,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "   - Confirm the modification in 1 short sentence with the updated event title, new time in IST, and delete button.\n"
             "4. When user asks to cancel, delete, or clean up events:\n"
             "   - For single or specific event deletion (e.g., 'Cancel my 3 PM meeting today', 'Delete Team Sync'):\n"
-            "     * Call `delete_calendar_events` directly with summary or event_id and confirm in 1 sentence.\n"
+            "     * Call `delete_calendar_events` directly with summary or event_id and confirm in 1 sentence (noting that any associated travel buffer was also removed).\n"
             "   - For bulk deletion requests (e.g., 'Clear all my meetings for this Friday', 'Delete all events next week'):\n"
             "     * FIRST call `list_events` with the relevant time range (e.g., time_min and time_max for that day in IST) to retrieve matching events.\n"
             "     * If MORE THAN 3 events match: List the matching events (title and time) and ask for user confirmation before deleting.\n"
