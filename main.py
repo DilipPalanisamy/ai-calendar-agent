@@ -30,6 +30,7 @@ from googleapiclient.errors import HttpError
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
+from parser import get_gemini_model_candidates
 
 # ---------------------------------------------------------------------------
 # 1. Environment & Path Setup
@@ -1747,36 +1748,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         )
 
         # 4. Initialize Gemini LLM with active Google AI models (excluding non-existent/deprecated ones)
-        configured_model = (os.getenv("GEMINI_MODEL") or "gemini-3.5-flash").strip()
-        raw_candidates = [
-            configured_model,
-            "gemini-3.5-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-pro-preview",
-        ]
-        legacy_deprecated = {
-            "gemini-3.6-pro",
-            "models/gemini-3.6-pro",
-            "gemini-2.5-flash",
-            "models/gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "models/gemini-2.5-pro",
-            "gemini-2.5-flash-lite",
-            "models/gemini-2.5-flash-lite",
-            "gemini-1.5-flash-latest",
-            "models/gemini-1.5-flash-latest",
-            "gemini-pro",
-            "models/gemini-pro",
-        }
-        unique_candidates = []
-        for cand in raw_candidates:
-            cand_clean = cand.removeprefix("models/").strip()
-            if cand_clean and cand_clean not in legacy_deprecated and cand_clean not in unique_candidates:
-                unique_candidates.append(cand_clean)
-
-        if not unique_candidates:
-            unique_candidates = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"]
+        unique_candidates = get_gemini_model_candidates()
 
         # 5. Multi-turn Agent Execution Loop with Model Fallback
         max_iterations = 4
@@ -1788,8 +1760,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 llm = ChatGoogleGenerativeAI(
                     model=model_name,
                     google_api_key=clean_api_key,
-                    temperature=0.2,
                     max_output_tokens=350,
+                    max_retries=1,
                 )
                 llm_with_tools = llm.bind_tools(tools)
 
@@ -1864,6 +1836,16 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
         if not final_text:
             if last_error:
+                err_msg = str(last_error)
+                if any(k in err_msg.lower() for k in ["resource_exhausted", "quota", "429"]):
+                    logger.error(f"All Gemini models exhausted free tier quota: {last_error}")
+                    return JSONResponse(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        content={
+                            "error": "Google Gemini API free tier rate limit or quota exceeded. Please wait a few seconds before trying again, or check your Google AI Studio plan.",
+                            "details": err_msg,
+                        },
+                    )
                 raise last_error
             final_text = "I processed your request. Let me know if you need anything else with your schedule or emails!"
 
@@ -1878,6 +1860,15 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
     except Exception as e:
         logger.error(f"Chat execution failed: {e}", exc_info=True)
+        err_str = str(e)
+        if any(k in err_str.lower() for k in ["resource_exhausted", "quota", "429"]):
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                content={
+                    "error": "Google Gemini API free tier rate limit or quota exceeded. Please wait a few seconds before trying again, or check your Google AI Studio plan.",
+                    "details": err_str,
+                },
+            )
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": f"An error occurred while processing your request: {str(e)}"},

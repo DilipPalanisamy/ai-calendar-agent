@@ -15,9 +15,9 @@ except ImportError:
 load_dotenv()
 
 
-def get_gemini_model_candidates(preferred_model: str | None = None):
-    """Return a safe list of Gemini model names, avoiding legacy unsupported or non-existent ones."""
-    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "gemini-3.5-flash").strip()
+def get_gemini_model_candidates(preferred_model: str | None = None) -> List[str]:
+    """Return a safe list of Gemini model names, prioritizing active high-throughput models and avoiding deprecated ones."""
+    configured_model = (preferred_model or os.getenv("GEMINI_MODEL") or os.getenv("GEMINI_MODEL_NAME") or "").strip()
     normalized = configured_model.removeprefix("models/") if configured_model.startswith("models/") else configured_model
 
     deprecated_models = {
@@ -29,8 +29,12 @@ def get_gemini_model_candidates(preferred_model: str | None = None):
         "models/gemini-2.5-pro",
         "gemini-2.5-flash-lite",
         "models/gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-flash",
         "gemini-1.5-flash-latest",
         "models/gemini-1.5-flash-latest",
+        "gemini-1.5-pro",
         "gemini-pro",
         "models/gemini-pro",
     }
@@ -39,7 +43,15 @@ def get_gemini_model_candidates(preferred_model: str | None = None):
     if normalized and normalized not in deprecated_models:
         candidates.append(normalized)
 
-    for fallback_model in ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"]:
+    for fallback_model in [
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-lite-latest",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3.1-pro-preview",
+    ]:
         if fallback_model not in candidates:
             candidates.append(fallback_model)
 
@@ -60,10 +72,11 @@ class MultiCalendarEvents(BaseModel):
 
 
 if ChatGoogleGenerativeAI is not None and os.getenv("GEMINI_API_KEY"):
+    top_candidates = get_gemini_model_candidates()
     llm = ChatGoogleGenerativeAI(
-        model=get_gemini_model_candidates()[0],
+        model=top_candidates[0] if top_candidates else "gemini-3.5-flash-lite",
         google_api_key=os.getenv("GEMINI_API_KEY"),
-        temperature=0,
+        max_retries=1,
     )
     structured_llm = llm.with_structured_output(MultiCalendarEvents)
 else:
@@ -254,8 +267,6 @@ def parse_schedule_message(message_text: str, user_timezone: str | None = None) 
         if hasattr(parsed, "events") and parsed.events:
             return MultiCalendarEvents(events=parsed.events)
     except Exception as exc:
-        if any(err in str(exc).lower() for err in ["quota", "resource_exhausted", "429"]):
-            return _fallback_parse(message_text, user_timezone)
-        raise
+        return _fallback_parse(message_text, user_timezone)
 
     return _fallback_parse(message_text, user_timezone)
