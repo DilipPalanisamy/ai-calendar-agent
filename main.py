@@ -32,7 +32,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from parser import get_gemini_model_candidates
 from gemini_resilience import acall_gemini_with_retry, call_gemini_with_retry
-from calendar_service import find_linked_travel_buffer_ids, format_google_calendar_link
+from calendar_service import find_linked_travel_buffer_ids, format_google_calendar_link, sync_calendar_timezone
 
 # ---------------------------------------------------------------------------
 # 1. Environment & Path Setup
@@ -79,26 +79,46 @@ CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "Asia/Kolkata")
 
 
 def normalize_iso_datetime(dt_str: str, default_tz_name: str = CALENDAR_TIMEZONE) -> str:
-    """Ensures ISO datetime string includes the explicit Indian Standard Time (+05:30) offset."""
+    """
+    Ensures ISO datetime string is strictly converted and formatted in the target timezone
+    (e.g., Indian Standard Time 'Asia/Kolkata' with explicit +05:30 offset).
+    """
     if not dt_str:
         return dt_str
     dt_str = str(dt_str).strip()
 
-    # If format is already with timezone offset (e.g. +05:30 or -04:00), return as is
-    if re.search(r"[+-]\d{2}:\d{2}$", dt_str):
-        return dt_str
-
-    if dt_str.endswith("Z"):
-        dt_str = dt_str[:-1]
-
     try:
-        dt = datetime.fromisoformat(dt_str)
+        target_tz = ZoneInfo(default_tz_name)
+    except Exception:
+        target_tz = ZoneInfo("Asia/Kolkata")
+
+    # If formatted with Z (UTC e.g. 2026-08-30T09:30:00Z)
+    if dt_str.endswith("Z") or dt_str.endswith("z"):
+        try:
+            dt = datetime.fromisoformat(dt_str[:-1] + "+00:00")
+            return dt.astimezone(target_tz).isoformat()
+        except Exception:
+            pass
+
+    # If formatted with explicit offset like +05:30, +00:00, or -04:00
+    if re.search(r"[+-]\d{2}:\d{2}$", dt_str):
+        try:
+            dt = datetime.fromisoformat(dt_str)
+            return dt.astimezone(target_tz).isoformat()
+        except Exception:
+            pass
+
+    # Naive datetime string without offset (e.g. 2026-08-30T15:00:00 or 2026-08-30 15:00)
+    try:
+        clean_iso = dt_str.replace(" ", "T")
+        dt = datetime.fromisoformat(clean_iso)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=ZoneInfo(default_tz_name))
+            dt = dt.replace(tzinfo=target_tz)
+        else:
+            dt = dt.astimezone(target_tz)
         return dt.isoformat()
     except Exception:
-        # Fallback appending offset if simple YYYY-MM-DDTHH:MM:SS
-        if "T" in dt_str and len(dt_str) >= 16 and not dt_str.endswith("+05:30"):
+        if "T" in dt_str and len(dt_str) >= 16 and not re.search(r"[+-]\d{2}:\d{2}$", dt_str):
             return f"{dt_str}+05:30"
         return dt_str
 
@@ -632,6 +652,12 @@ async def create_event_tool(
     try:
         service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, static_discovery=False)
         tz = ZoneInfo(CALENDAR_TIMEZONE)
+
+        # Proactively ensure user's Google Calendar primary timezone is set to IST so web UI displays correctly
+        try:
+            await asyncio.to_thread(sync_calendar_timezone, service, CALENDAR_TIMEZONE)
+        except Exception:
+            pass
 
         # Normalize start_time and end_time to ensure explicit Indian Standard Time (+05:30) offset
         norm_start = normalize_iso_datetime(start_time, CALENDAR_TIMEZONE)
@@ -1401,6 +1427,14 @@ async def auth_callback(request: Request):
         request.session["user_picture"] = picture
         request.session.pop("oauth_state", None)
 
+        # Auto-sync the user's primary calendar timezone to Asia/Kolkata (IST) so Google Calendar web UI displays all meetings correctly
+        try:
+            cal_service = await asyncio.to_thread(build, "calendar", "v3", credentials=credentials, static_discovery=False)
+            await asyncio.to_thread(sync_calendar_timezone, cal_service, CALENDAR_TIMEZONE)
+            logger.info(f"Primary calendar timezone for '{email}' verified/synced to {CALENDAR_TIMEZONE}.")
+        except Exception as sync_tz_err:
+            logger.warning(f"Could not auto-sync primary calendar timezone for '{email}': {sync_tz_err}")
+
         logger.info(f"Google Account '{email}' successfully merged into session (refresh_token present: {bool(new_refresh_token)}) & set as active.")
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -1842,7 +1876,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         system_prompt = (
             "System Directive: You are a high-speed calendar AI assistant. Be concise, direct, and helpful. "
             f"The user's local timezone is Indian Standard Time (IST), timezone identifier '{CALENDAR_TIMEZONE}' (UTC+5:30).\n"
-            f"All relative and absolute times mentioned by the user MUST be interpreted in IST ('{CALENDAR_TIMEZONE}'). "
+            f"All relative and absolute times mentioned by the user MUST be interpreted in IST ('{CALENDAR_TIMEZONE}').\n"
+            f"When computing `start_time` and `end_time` for tool calls, ALWAYS output ISO 8601 strings in local IST with explicit '+05:30' offset (e.g., for 3:00 PM IST on 2026-08-30 output '2026-08-30T15:00:00+05:30'). DO NOT convert to UTC or output 'Z'.\n"
             "Perform tool calls immediately without conversational filler.\n\n"
             f"Active Account: {active_email}\n"
             f"Current Local DateTime: {current_time_str} (ISO: {current_iso_str})\n"
@@ -1861,7 +1896,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             "   - If a venue is mentioned, extract it into `location` and specify `travel_buffer_minutes=30`.\n"
             "   - Extract guest emails into `attendees` (e.g. ['colleague@example.com']).\n"
             "   - ONLY set `add_google_meet=True` if the user explicitly asks for Google Meet or a video call (e.g. 'with Google Meet', 'with video link'). For normal meetings, hangouts, or syncs, leave `add_google_meet=False`.\n"
-            "   - Compute start_time and end_time in IST with '+05:30' offset and call `create_event`.\n"
+            "   - Compute start_time and end_time directly in IST with '+05:30' offset and call `create_event`.\n"
             "   - If `create_event` returns `conflict_detected`:\n"
             "     * Inform the user clearly: \"You already have '[Conflicting Event]' scheduled at [Time].\"\n"
             "     * Present alternative slots cleanly as numbered options.\n"

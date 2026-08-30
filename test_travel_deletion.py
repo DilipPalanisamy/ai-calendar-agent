@@ -362,6 +362,29 @@ class TestTravelCascadeDeletion(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_normalize_iso_datetime_converts_all_timezones_accurately(self):
+        from main import normalize_iso_datetime
+
+        # 1. Naive 3:00 PM -> 15:00:00+05:30
+        res1 = normalize_iso_datetime("2026-08-30T15:00:00", "Asia/Kolkata")
+        self.assertEqual(res1, "2026-08-30T15:00:00+05:30")
+
+        # 2. Already IST +05:30
+        res2 = normalize_iso_datetime("2026-08-30T15:00:00+05:30", "Asia/Kolkata")
+        self.assertEqual(res2, "2026-08-30T15:00:00+05:30")
+
+        # 3. UTC string with Z (09:30:00Z -> 15:00:00+05:30)
+        res3 = normalize_iso_datetime("2026-08-30T09:30:00Z", "Asia/Kolkata")
+        self.assertEqual(res3, "2026-08-30T15:00:00+05:30")
+
+        # 4. UTC string with +00:00 (09:30:00+00:00 -> 15:00:00+05:30)
+        res4 = normalize_iso_datetime("2026-08-30T09:30:00+00:00", "Asia/Kolkata")
+        self.assertEqual(res4, "2026-08-30T15:00:00+05:30")
+
+        # 5. Space separated datetime "2026-08-30 15:00:00"
+        res5 = normalize_iso_datetime("2026-08-30 15:00:00", "Asia/Kolkata")
+        self.assertEqual(res5, "2026-08-30T15:00:00+05:30")
+
 
 if __name__ == "__main__":
     unittest.main()
