@@ -445,6 +445,17 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
         return None
 
 
+def handle_google_tool_error(err: Exception, action_name: str) -> str:
+    """Helper to detect auth/token expiration issues and return a clean re-authentication link."""
+    err_str = str(err).lower()
+    if any(k in err_str for k in ["refresh_token", "invalid_grant", "unauthorized", "credentials", "401", "token expired"]):
+        return (
+            "⚠️ Google Calendar authentication is currently missing or expired. "
+            "Please [Click here to Re-authenticate with Google](/auth/login) to enable scheduling."
+        )
+    return f"Failed to {action_name}: {str(err)}"
+
+
 # ---------------------------------------------------------------------------
 # 5. Async & High-Performance Google Tool Functions
 # ---------------------------------------------------------------------------
@@ -495,10 +506,10 @@ async def list_events_tool(creds: Credentials, time_min: Optional[str] = None, m
 
     except HttpError as err:
         logger.error(f"Google Calendar API Error: {err}")
-        return f"Error querying calendar: {err}"
+        return handle_google_tool_error(err, "query calendar")
     except Exception as e:
         logger.error(f"Unexpected error in list_events: {e}")
-        return f"Failed to fetch calendar events: {str(e)}"
+        return handle_google_tool_error(e, "fetch calendar events")
 
 
 # ---------------------------------------------------------------------------
@@ -854,10 +865,10 @@ async def create_event_tool(
 
     except HttpError as err:
         logger.error(f"Google Calendar Insert Error: {err}")
-        return f"Error creating calendar event: {err}"
+        return handle_google_tool_error(err, "create calendar event")
     except Exception as e:
         logger.error(f"Unexpected error in create_event: {e}")
-        return f"Failed to create event: {str(e)}"
+        return handle_google_tool_error(e, "create event")
 
 
 async def delete_calendar_event_tool(
@@ -947,10 +958,10 @@ async def delete_calendar_event_tool(
 
     except HttpError as err:
         logger.error(f"Google Calendar Delete Error: {err}")
-        return f"Error deleting calendar event: {err}"
+        return handle_google_tool_error(err, "delete calendar event")
     except Exception as e:
         logger.error(f"Unexpected error in delete_calendar_event: {e}")
-        return f"Failed to delete event: {str(e)}"
+        return handle_google_tool_error(e, "delete event")
 
 
 async def update_calendar_event_tool(
@@ -1114,10 +1125,10 @@ async def update_calendar_event_tool(
 
     except HttpError as err:
         logger.error(f"Google Calendar Patch Error: {err}")
-        return f"Error updating calendar event: {err}"
+        return handle_google_tool_error(err, "update calendar event")
     except Exception as e:
         logger.error(f"Unexpected error in update_calendar_event: {e}")
-        return f"Failed to update event: {str(e)}"
+        return handle_google_tool_error(e, "update event")
 
 
 async def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) -> str:
@@ -1165,10 +1176,10 @@ async def check_gmail_invites_tool(creds: Credentials, max_results: int = 10) ->
 
     except HttpError as err:
         logger.error(f"Gmail API Error: {err}")
-        return f"Error querying Gmail: {err}"
+        return handle_google_tool_error(err, "query Gmail")
     except Exception as e:
         logger.error(f"Unexpected error in check_gmail_invites: {e}")
-        return f"Failed to search Gmail invites: {str(e)}"
+        return handle_google_tool_error(e, "search Gmail invites")
 
 
 def create_oauth_flow(request: Request, state: Optional[str] = None) -> Flow:
@@ -2265,8 +2276,9 @@ async def serve_index(request: Request):
     Serves a public HTML page with Google Sign-in for unauthenticated visitors (HTTP 200 OK, NO redirects).
     Serves the chat assistant interface if the user is authenticated.
     """
+    creds = get_user_credentials(request)
     active_email = get_active_account_email(request)
-    if not active_email:
+    if not creds or not active_email:
         try:
             return templates.TemplateResponse(request=request, name="login.html", context={"request": request})
         except Exception:
