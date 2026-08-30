@@ -82,9 +82,9 @@ def get_google_credentials():
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
             try:
-                creds = flow.run_local_server(port=0)
+                creds = flow.run_local_server(port=0, access_type='offline', prompt='consent')
             except Exception:
-                creds = flow.run_console()
+                creds = flow.run_console(access_type='offline', prompt='consent')
 
         TOKEN_PATH.write_text(creds.to_json(), encoding='utf-8')
 

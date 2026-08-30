@@ -10,8 +10,8 @@ if not os.path.exists('credentials.json'):
     print("❌ ERROR: credentials.json is missing! Please place it in this folder.")
 else:
     flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-    # console=True forces a manual URL output
-    creds = flow.run_local_server(port=0, open_browser=False)
+    # prompt='consent' and access_type='offline' ensure a persistent refresh_token is issued
+    creds = flow.run_local_server(port=0, open_browser=False, access_type='offline', prompt='consent')
     
     with open('token.json', 'w') as token:
         token.write(creds.to_json())

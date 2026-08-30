@@ -382,7 +382,9 @@ def get_active_account_email(request: Request) -> Optional[str]:
 def get_user_credentials(request: Request) -> Optional[Credentials]:
     """
     Dynamically deserializes and refreshes credentials for the ACTIVE account.
-    Updates the session dictionary if tokens are refreshed.
+    Enforces persistent refresh_token usage:
+    - If access token is expired, refreshes it using GoogleRequest().
+    - If refresh fails or credentials lack refresh_token when invalid, clears invalid credentials entry and returns None to trigger re-consent.
     """
     accounts = get_accounts_dict(request)
     active_email = get_active_account_email(request)
@@ -396,25 +398,42 @@ def get_user_credentials(request: Request) -> Optional[Credentials]:
         client_info = client_config.get("web") or client_config.get("installed") or {}
         client_id = creds_data.get("client_id") or client_info.get("client_id") or GOOGLE_CLIENT_ID
         client_secret = creds_data.get("client_secret") or client_info.get("client_secret") or GOOGLE_CLIENT_SECRET
+        refresh_token = creds_data.get("refresh_token")
 
         creds = Credentials(
             token=creds_data.get("token"),
-            refresh_token=creds_data.get("refresh_token"),
+            refresh_token=refresh_token,
             token_uri=creds_data.get("token_uri", "https://oauth2.googleapis.com/token"),
             client_id=client_id,
             client_secret=client_secret,
             scopes=creds_data.get("scopes", SCOPES),
         )
 
-        if creds.expired and creds.refresh_token:
-            logger.info(f"Access token expired for '{active_email}'. Refreshing...")
-            creds.refresh(GoogleRequest())
-            creds_data["token"] = creds.token
-            creds_data["refresh_token"] = creds.refresh_token
-            creds_data["token_uri"] = creds.token_uri
-            accounts = get_accounts_dict(request)
-            accounts[active_email] = creds_data
-            request.session["accounts"] = accounts
+        if not creds.valid:
+            if creds.expired and creds.refresh_token:
+                logger.info(f"Access token expired for '{active_email}'. Refreshing using persistent refresh_token...")
+                try:
+                    creds.refresh(GoogleRequest())
+                    creds_data["token"] = creds.token
+                    creds_data["refresh_token"] = creds.refresh_token or refresh_token
+                    creds_data["token_uri"] = creds.token_uri
+                    accounts = get_accounts_dict(request)
+                    accounts[active_email] = creds_data
+                    request.session["accounts"] = accounts
+                except Exception as refresh_err:
+                    logger.error(f"Failed to refresh token for '{active_email}': {refresh_err}")
+                    accounts.pop(active_email, None)
+                    request.session["accounts"] = accounts
+                    if request.session.get("active_account") == active_email:
+                        request.session.pop("active_account", None)
+                    return None
+            elif not creds.token and not creds.refresh_token:
+                logger.warning(f"Active account '{active_email}' is missing both token and refresh_token.")
+                accounts.pop(active_email, None)
+                request.session["accounts"] = accounts
+                if request.session.get("active_account") == active_email:
+                    request.session.pop("active_account", None)
+                return None
 
         request.session["user_email"] = active_email
         request.session["user_name"] = creds_data.get("name", active_email)
@@ -1207,13 +1226,13 @@ async def auth_login(request: Request):
 
 @app.get("/auth/add-account", response_class=RedirectResponse)
 async def auth_add_account(request: Request):
-    """Initiates OAuth consent flow to connect an additional Google account with account selection."""
+    """Initiates OAuth consent flow to connect an additional Google account with account selection and consent prompt."""
     try:
         flow = create_oauth_flow(request)
         authorization_url, state = flow.authorization_url(
             access_type="offline",
+            prompt="consent select_account",
             include_granted_scopes="true",
-            prompt="select_account",
         )
 
         request.session["oauth_state"] = state
@@ -1232,8 +1251,10 @@ async def auth_callback(request: Request):
     """
     Handles OAuth callback:
     - Exchanges authorization code for tokens.
-    - Stores credentials inside the multi-account dictionary in session.
-    - Flags if the account was already connected and sets it active.
+    - Captures and persists the refresh_token in session/database.
+    - If Google omits the refresh_token, preserves the previously stored refresh_token if present.
+    - Flags the session to force re-consent if refresh_token is missing.
+    - Stores credentials inside the multi-account dictionary in session and sets it active.
     """
     state = request.session.get("oauth_state")
     code = request.query_params.get("code")
@@ -1262,14 +1283,23 @@ async def auth_callback(request: Request):
         existing_accounts = get_accounts_dict(request)
         accounts = dict(existing_accounts)
         already_connected = email in accounts
+        existing_entry = accounts.get(email, {})
 
-        # Store compact credentials per account so multi-account sessions fit well within cookie limit
+        # Extract refresh_token from token exchange payload, preserving existing one if not returned
+        new_refresh_token = credentials.refresh_token or existing_entry.get("refresh_token")
+
+        if not new_refresh_token:
+            logger.warning(f"Google OAuth did not return a refresh_token for '{email}'. Flagging session to force re-consent.")
+            request.session["account_warning"] = "Missing offline refresh token credentials. Please re-authenticate and grant full consent."
+
+        # Immediately update and overwrite the existing user's credentials entry in session
         accounts[email] = {
             "token": credentials.token,
-            "refresh_token": credentials.refresh_token,
+            "refresh_token": new_refresh_token,
             "token_uri": credentials.token_uri or "https://oauth2.googleapis.com/token",
             "name": name,
             "picture": picture,
+            "scopes": credentials.scopes or SCOPES,
         }
 
         # Explicitly assign dictionary back to session
@@ -1277,7 +1307,7 @@ async def auth_callback(request: Request):
         request.session["active_account"] = email
 
         if already_connected:
-            request.session["account_notice"] = f"ℹ️ Account '{email}' was already connected and is now set as active."
+            request.session["account_notice"] = f"ℹ️ Account '{email}' credentials updated with persistent refresh token and set as active."
         else:
             request.session["account_notice"] = f"✅ Successfully connected Google account: '{email}'."
 
@@ -1287,7 +1317,7 @@ async def auth_callback(request: Request):
         request.session["user_picture"] = picture
         request.session.pop("oauth_state", None)
 
-        logger.info(f"Google Account '{email}' successfully merged into session (total accounts: {len(accounts)}) & set as active.")
+        logger.info(f"Google Account '{email}' successfully merged into session (refresh_token present: {bool(new_refresh_token)}) & set as active.")
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     except Exception as e:
