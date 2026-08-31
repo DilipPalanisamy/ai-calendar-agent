@@ -2228,7 +2228,7 @@ async def serve_privacy(request: Request):
         <p>If you have any questions regarding this Privacy Policy or our data practices, please contact us via our GitHub repository at <a href="https://github.com/DilipPalanisamy/ai-calendar-agent" target="_blank">github.com/DilipPalanisamy/ai-calendar-agent</a>.</p>
 
         <div class="footer-note">
-            © 2026 AI Calendar Assistant. All rights reserved.
+            © 2026 AI Calendar Assistant. All rights reserved. • <a href="/terms">Terms of Service</a>
         </div>
     </div>
 </body>
@@ -2389,7 +2389,7 @@ async def serve_terms(request: Request):
         <p>For questions or feedback regarding these Terms, please reach out via <a href="https://github.com/DilipPalanisamy/ai-calendar-agent" target="_blank">github.com/DilipPalanisamy/ai-calendar-agent</a>.</p>
 
         <div class="footer-note">
-            © 2026 AI Calendar Assistant. All rights reserved.
+            © 2026 AI Calendar Assistant. All rights reserved. • <a href="/privacy">Privacy Policy</a>
         </div>
     </div>
 </body>

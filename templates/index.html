@@ -376,6 +376,87 @@
             background: rgba(239, 68, 68, 0.1);
         }
 
+        /* Sidebar Bottom Corner Legal Links */
+        .sidebar-legal-corner {
+            padding: 0.5rem 1rem;
+            padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            background: rgba(0, 0, 0, 0.35);
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .sidebar-legal-corner a {
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }
+
+        .sidebar-legal-corner a:hover {
+            color: var(--text-secondary);
+            text-decoration: underline;
+        }
+
+        .sidebar-legal-corner .legal-sep {
+            color: var(--text-muted);
+            opacity: 0.5;
+            font-size: 0.65rem;
+        }
+
+        /* Bottom-Right Floating Corner Legal Links */
+        .main-corner-legal {
+            position: absolute;
+            bottom: 0.65rem;
+            right: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            z-index: 25;
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            padding: 0.25rem 0.65rem;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            opacity: 0.75;
+            transition: all 0.2s ease;
+        }
+
+        .main-corner-legal:hover {
+            opacity: 1;
+            border-color: var(--border-hover);
+            background: rgba(31, 41, 55, 0.85);
+        }
+
+        .main-corner-legal a {
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }
+
+        .main-corner-legal a:hover {
+            color: var(--text-secondary);
+            text-decoration: underline;
+        }
+
+        .main-corner-legal .legal-separator {
+            color: var(--text-muted);
+            opacity: 0.5;
+            font-size: 0.65rem;
+        }
+
+        @media (max-width: 768px) {
+            .main-corner-legal {
+                display: none;
+            }
+        }
+
         /* ----------------------------------------------------
            Main Chat Container
            ---------------------------------------------------- */
@@ -1192,6 +1273,13 @@
                     <i class="fa-solid fa-arrow-right-from-bracket"></i>
                 </a>
             </div>
+
+            <!-- Sidebar Bottom Corner Legal Links -->
+            <div class="sidebar-legal-corner">
+                <a href="/privacy" target="_blank">Privacy Policy</a>
+                <span class="legal-sep">•</span>
+                <a href="/terms" target="_blank">Terms of Service</a>
+            </div>
         </aside>
 
         <!-- Main Chat Area -->
@@ -1284,10 +1372,13 @@
                         <i class="fa-solid fa-paper-plane"></i>
                     </button>
                 </div>
-                <div class="chat-legal-footer" style="font-size: 0.72rem; color: var(--text-muted); text-align: center; margin-top: 0.5rem;">
-                    <a href="/privacy" target="_blank" style="color: var(--text-muted); text-decoration: none;">Privacy Policy</a> • 
-                    <a href="/terms" target="_blank" style="color: var(--text-muted); text-decoration: none;">Terms of Service</a>
-                </div>
+            </div>
+
+            <!-- Corner Legal Links -->
+            <div class="main-corner-legal" id="main-corner-legal">
+                <a href="/privacy" target="_blank">Privacy Policy</a>
+                <span class="legal-separator">•</span>
+                <a href="/terms" target="_blank">Terms of Service</a>
             </div>
         </main>
     </div>

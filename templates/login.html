@@ -199,28 +199,64 @@
         }
 
         .login-footer {
-            margin-top: 1.75rem;
-            font-size: 0.75rem;
+            margin-top: 1.5rem;
+            font-size: 0.76rem;
             color: var(--text-muted);
-            line-height: 1.6;
+            line-height: 1.5;
         }
 
-        .login-footer a {
-            color: #818cf8;
+        /* Floating Corner Legal Links */
+        .corner-legal-links {
+            position: fixed;
+            bottom: 1.25rem;
+            right: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            padding: 0.4rem 0.85rem;
+            border-radius: 20px;
+            z-index: 100;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+            transition: all 0.2s ease;
+        }
+
+        .corner-legal-links:hover {
+            border-color: var(--border-hover);
+            background: rgba(31, 41, 55, 0.9);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .corner-legal-links a {
+            color: var(--text-secondary);
             text-decoration: none;
             font-weight: 500;
+            transition: color 0.15s ease;
         }
 
-        .login-footer a:hover {
+        .corner-legal-links a:hover {
+            color: #ffffff;
             text-decoration: underline;
         }
 
-        .legal-links {
-            margin-top: 0.75rem;
-            display: flex;
-            justify-content: center;
-            gap: 1rem;
-            font-size: 0.8rem;
+        .corner-legal-links .legal-separator {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            opacity: 0.5;
+        }
+
+        @media (max-width: 640px) {
+            .corner-legal-links {
+                bottom: 1rem;
+                right: 50%;
+                transform: translateX(50%);
+                white-space: nowrap;
+            }
         }
     </style>
 </head>
@@ -271,10 +307,14 @@
 
         <div class="login-footer">
             By signing in, you grant AI Calendar Assistant permission to manage events on your Google Calendar and view invitation emails.
-            <div class="legal-links">
-                <a href="/privacy">Privacy Policy</a> • <a href="/terms">Terms of Service</a>
-            </div>
         </div>
+    </div>
+
+    <!-- Floating Corner Legal Links -->
+    <div class="corner-legal-links" id="corner-legal-links">
+        <a href="/privacy" target="_blank">Privacy Policy</a>
+        <span class="legal-separator">•</span>
+        <a href="/terms" target="_blank">Terms of Service</a>
     </div>
 </body>
 </html>
