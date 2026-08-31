@@ -1,19 +1,24 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="google-site-verification" content="VEHl4mzgS2aSF1pyd69IZiLSW6EC2m2VrnC_A4tpTxo" />
     <meta name="theme-color" content="#0b0f17">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>AI Calendar Assistant</title>
-    <meta name="description" content="AI Calendar Assistant: Manage, schedule, and delete Google Calendar events and scan Gmail invitations with Gemini AI.">
+    <meta name="description"
+        content="AI Calendar Assistant: Manage, schedule, and delete Google Calendar events and scan Gmail invitations with Gemini AI.">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
+        rel="stylesheet">
 
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -52,7 +57,8 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        html, body {
+        html,
+        body {
             height: 100%;
             height: 100dvh;
             background-color: var(--bg-primary);
@@ -164,7 +170,8 @@
             transition: all 0.2s ease;
         }
 
-        .btn-new-chat:hover, .btn-new-chat:active {
+        .btn-new-chat:hover,
+        .btn-new-chat:active {
             background: var(--accent-primary);
             color: #ffffff;
             border-color: var(--accent-primary);
@@ -197,7 +204,8 @@
             gap: 0.3rem;
         }
 
-        .btn-clear-history:hover, .btn-clear-history:active {
+        .btn-clear-history:hover,
+        .btn-clear-history:active {
             color: #ef4444;
         }
 
@@ -214,6 +222,7 @@
         .history-list::-webkit-scrollbar {
             width: 4px;
         }
+
         .history-list::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 4px;
@@ -234,7 +243,8 @@
             touch-action: manipulation;
         }
 
-        .history-item:hover, .history-item:active {
+        .history-item:hover,
+        .history-item:active {
             background: var(--bg-tertiary);
             color: var(--text-primary);
         }
@@ -284,7 +294,8 @@
             pointer-events: auto;
         }
 
-        .history-delete-btn:hover, .history-delete-btn:active {
+        .history-delete-btn:hover,
+        .history-delete-btn:active {
             color: #ef4444;
             background: rgba(239, 68, 68, 0.12);
         }
@@ -371,7 +382,8 @@
             justify-content: center;
         }
 
-        .btn-logout:hover, .btn-logout:active {
+        .btn-logout:hover,
+        .btn-logout:active {
             color: #ef4444;
             background: rgba(239, 68, 68, 0.1);
         }
@@ -544,7 +556,8 @@
             max-width: 220px;
         }
 
-        .account-badge-btn:hover, .account-badge-btn:active {
+        .account-badge-btn:hover,
+        .account-badge-btn:active {
             border-color: var(--border-hover);
             background: var(--bg-tertiary);
         }
@@ -637,7 +650,8 @@
             transition: background 0.15s ease;
         }
 
-        .dropdown-account-item:hover, .dropdown-account-item:active {
+        .dropdown-account-item:hover,
+        .dropdown-account-item:active {
             background: var(--bg-tertiary);
         }
 
@@ -718,7 +732,8 @@
             transition: color 0.15s;
         }
 
-        .btn-remove-account:hover, .btn-remove-account:active {
+        .btn-remove-account:hover,
+        .btn-remove-account:active {
             color: #ef4444;
         }
 
@@ -745,7 +760,8 @@
             transition: background 0.15s;
         }
 
-        .btn-add-account:hover, .btn-add-account:active {
+        .btn-add-account:hover,
+        .btn-add-account:active {
             background: rgba(99, 102, 241, 0.12);
         }
 
@@ -765,6 +781,7 @@
         .chat-viewport::-webkit-scrollbar {
             width: 6px;
         }
+
         .chat-viewport::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 6px;
@@ -791,8 +808,15 @@
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .welcome-icon {
@@ -847,7 +871,8 @@
             min-height: var(--touch-target);
         }
 
-        .prompt-card:hover, .prompt-card:active {
+        .prompt-card:hover,
+        .prompt-card:active {
             border-color: var(--accent-primary);
             background: rgba(99, 102, 241, 0.08);
             transform: translateY(-2px);
@@ -881,8 +906,15 @@
         }
 
         @keyframes messageAppear {
-            from { opacity: 0; transform: translateY(6px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .message-row.user {
@@ -967,7 +999,8 @@
             transition: all 0.2s ease;
         }
 
-        .btn-delete-event:hover, .btn-delete-event:active {
+        .btn-delete-event:hover,
+        .btn-delete-event:active {
             background: #ef4444;
             color: #ffffff;
             box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
@@ -981,13 +1014,45 @@
         }
 
         /* Markdown formatting */
-        .message-content p { margin-bottom: 0.6rem; }
-        .message-content p:last-child { margin-bottom: 0; }
-        .message-content ul, .message-content ol { margin-left: 1.2rem; margin-bottom: 0.6rem; }
-        .message-content li { margin-bottom: 0.25rem; }
-        .message-content a { color: #818cf8; text-decoration: underline; word-break: break-all; }
-        .message-content code { background: rgba(0, 0, 0, 0.3); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.86em; }
-        .message-content pre { background: rgba(0, 0, 0, 0.4); padding: 0.75rem; border-radius: var(--radius-md); overflow-x: auto; margin: 0.5rem 0; }
+        .message-content p {
+            margin-bottom: 0.6rem;
+        }
+
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message-content ul,
+        .message-content ol {
+            margin-left: 1.2rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .message-content li {
+            margin-bottom: 0.25rem;
+        }
+
+        .message-content a {
+            color: #818cf8;
+            text-decoration: underline;
+            word-break: break-all;
+        }
+
+        .message-content code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.86em;
+        }
+
+        .message-content pre {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 0.75rem;
+            border-radius: var(--radius-md);
+            overflow-x: auto;
+            margin: 0.5rem 0;
+        }
 
         /* Thinking Indicator */
         .thinking-indicator {
@@ -1009,12 +1074,28 @@
             border-radius: 50%;
             animation: pulse 1.4s infinite ease-in-out both;
         }
-        .thinking-dot:nth-child(1) { animation-delay: -0.32s; }
-        .thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+
+        .thinking-dot:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .thinking-dot:nth-child(2) {
+            animation-delay: -0.16s;
+        }
 
         @keyframes pulse {
-            0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
-            40% { transform: scale(1); opacity: 1; }
+
+            0%,
+            80%,
+            100% {
+                transform: scale(0);
+                opacity: 0.4;
+            }
+
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
         }
 
         /* ----------------------------------------------------
@@ -1056,7 +1137,8 @@
             outline: none;
             color: var(--text-primary);
             font-family: inherit;
-            font-size: 16px; /* Prevents auto-zoom on iOS */
+            font-size: 16px;
+            /* Prevents auto-zoom on iOS */
             resize: none;
             max-height: 110px;
             line-height: 1.4;
@@ -1084,7 +1166,8 @@
             font-size: 1.05rem;
         }
 
-        .btn-send:hover, .btn-send:active {
+        .btn-send:hover,
+        .btn-send:active {
             background: var(--accent-hover);
             transform: scale(1.04);
         }
@@ -1102,14 +1185,22 @@
             animation: pulseStop 1.5s infinite ease-in-out;
         }
 
-        .btn-send.stop-mode:hover, .btn-send.stop-mode:active {
+        .btn-send.stop-mode:hover,
+        .btn-send.stop-mode:active {
             background: #dc2626 !important;
             transform: scale(1.08);
         }
 
         @keyframes pulseStop {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
-            50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+            }
         }
 
         .btn-mic {
@@ -1128,7 +1219,8 @@
             flex-shrink: 0;
         }
 
-        .btn-mic:hover, .btn-mic:active {
+        .btn-mic:hover,
+        .btn-mic:active {
             background: var(--bg-tertiary);
             color: var(--text-primary);
         }
@@ -1140,9 +1232,20 @@
         }
 
         @keyframes micPulse {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); transform: scale(1); }
-            50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); transform: scale(1.06); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); transform: scale(1); }
+            0% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+                transform: scale(1);
+            }
+
+            50% {
+                box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+                transform: scale(1.06);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+                transform: scale(1);
+            }
         }
 
         /* ----------------------------------------------------
@@ -1215,6 +1318,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="app-container">
         <!-- Mobile Sidebar Overlay -->
@@ -1249,7 +1353,8 @@
             <!-- Dynamic Session List with Event Delegation -->
             <div class="history-list" id="history-list">
                 <div class="history-empty-state">
-                    <i class="fa-regular fa-comments" style="font-size: 1.6rem; margin-bottom: 0.5rem; opacity: 0.4;"></i>
+                    <i class="fa-regular fa-comments"
+                        style="font-size: 1.6rem; margin-bottom: 0.5rem; opacity: 0.4;"></i>
                     <p>No chat history yet.<br>Start a conversation!</p>
                 </div>
             </div>
@@ -1259,9 +1364,9 @@
                 <div class="user-info">
                     <div class="user-avatar" id="sidebar-user-avatar">
                         {% if user_picture %}
-                            <img src="{{ user_picture }}" alt="{{ user_name }}">
+                        <img src="{{ user_picture }}" alt="{{ user_name }}">
                         {% else %}
-                            <i class="fa-solid fa-user"></i>
+                        <i class="fa-solid fa-user"></i>
                         {% endif %}
                     </div>
                     <div class="user-details">
@@ -1298,9 +1403,9 @@
                     <button class="account-badge-btn" id="account-badge-btn" title="Switch or Add Google Account">
                         <div class="account-badge-avatar" id="header-account-avatar">
                             {% if user_picture %}
-                                <img src="{{ user_picture }}" alt="{{ user_name }}">
+                            <img src="{{ user_picture }}" alt="{{ user_name }}">
                             {% else %}
-                                <i class="fa-solid fa-user"></i>
+                            <i class="fa-solid fa-user"></i>
                             {% endif %}
                         </div>
                         <span class="account-badge-email" id="header-account-email">{{ user_email }}</span>
@@ -1331,20 +1436,24 @@
                             <i class="fa-solid fa-robot"></i>
                         </div>
                         <h1 class="welcome-title">AI Calendar Assistant</h1>
-                        <p class="welcome-subtitle">Your intelligent schedule coordinator & Gmail assistant powered by Gemini AI.</p>
+                        <p class="welcome-subtitle">Your intelligent schedule coordinator & Gmail assistant powered by
+                            Gemini AI.</p>
 
                         <div class="prompt-grid">
-                            <div class="prompt-card" onclick="sendPrompt('What upcoming events do I have on my calendar this week?')">
+                            <div class="prompt-card"
+                                onclick="sendPrompt('What upcoming events do I have on my calendar this week?')">
                                 <i class="fa-solid fa-calendar-days"></i>
                                 <h4>List upcoming events</h4>
                                 <p>"What events do I have scheduled for this week?"</p>
                             </div>
-                            <div class="prompt-card" onclick="sendPrompt('Schedule a meeting with my friends tomorrow at 3 PM')">
+                            <div class="prompt-card"
+                                onclick="sendPrompt('Schedule a meeting with my friends tomorrow at 3 PM')">
                                 <i class="fa-solid fa-calendar-plus"></i>
                                 <h4>Schedule a meeting</h4>
                                 <p>"Schedule a meeting with my friends tomorrow at 3 PM"</p>
                             </div>
-                            <div class="prompt-card" onclick="sendPrompt('Check my unread Gmail inbox for coffee, tea, or meeting invitations')">
+                            <div class="prompt-card"
+                                onclick="sendPrompt('Check my unread Gmail inbox for coffee, tea, or meeting invitations')">
                                 <i class="fa-solid fa-mug-hot"></i>
                                 <h4>Scan Gmail invites</h4>
                                 <p>"Check my inbox for coffee, tea, or sync invites"</p>
@@ -1353,17 +1462,15 @@
                     </div>
 
                     <!-- Messages Container -->
-                    <div id="chat-messages" style="display: flex; flex-direction: column; gap: 1.25rem; width: 100%;"></div>
+                    <div id="chat-messages" style="display: flex; flex-direction: column; gap: 1.25rem; width: 100%;">
+                    </div>
                 </div>
             </div>
 
             <!-- Input Bar with Voice Recognition, Send & Stop Generating Button -->
             <div class="chat-input-area">
                 <div class="input-wrapper">
-                    <textarea 
-                        id="chat-input" 
-                        class="chat-input" 
-                        placeholder="Message AI Calendar Assistant or use voice..." 
+                    <textarea id="chat-input" class="chat-input" placeholder="Message AI Calendar Assistant..."
                         rows="1"></textarea>
                     <button class="btn-mic" id="mic-btn" title="Voice Input (Click to Speak)" aria-label="Voice Input">
                         <i class="fa-solid fa-microphone"></i>
@@ -1445,13 +1552,13 @@
         });
 
         // Auto-resize textarea
-        chatInput.addEventListener('input', function() {
+        chatInput.addEventListener('input', function () {
             this.style.height = 'auto';
             this.style.height = Math.min(this.scrollHeight, 110) + 'px';
         });
 
         // Submit on Enter (Shift+Enter for new line)
-        chatInput.addEventListener('keydown', function(e) {
+        chatInput.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 if (isProcessing && currentAbortController) {
@@ -1541,7 +1648,7 @@
 
             if (sender === 'assistant') {
                 const renderer = new marked.Renderer();
-                renderer.link = function(href, title, text) {
+                renderer.link = function (href, title, text) {
                     const linkHref = typeof href === 'object' && href !== null ? (href.href || '') : String(href || '');
                     const linkTitle = typeof href === 'object' && href !== null ? (href.title || '') : (title || '');
                     const linkText = typeof href === 'object' && href !== null ? (href.text || '') : (text || '');
@@ -1707,9 +1814,9 @@
 
                     const item = document.createElement('div');
                     item.className = `dropdown-account-item ${isActive ? 'active' : ''}`;
-                    
+
                     const initial = (name || email || 'U').charAt(0).toUpperCase();
-                    const avatarHtml = picture 
+                    const avatarHtml = picture
                         ? `<img src="${escapeHtml(picture)}" alt="${escapeHtml(name)}">`
                         : `<span style="font-weight: 700; color: white;">${initial}</span>`;
 
@@ -1856,7 +1963,7 @@
 
         async function selectSession(sessionId) {
             if (!sessionId) return;
-            
+
             if (isProcessing && currentAbortController) {
                 stopGeneration();
             }
@@ -1957,7 +2064,7 @@
             recognition = new SpeechRecognition();
             recognition.continuous = true;       // Keep listening across natural pauses
             recognition.interimResults = true;    // Show live transcript in real-time
-            
+
             // Prefer English dialect from browser or default to en-IN / en-US
             const detectedLang = navigator.language || 'en-IN';
             recognition.lang = detectedLang.toLowerCase().startsWith('en') ? detectedLang : 'en-IN';
@@ -1976,7 +2083,7 @@
                     if (isListening && recognition) {
                         try {
                             recognition.stop();
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }, 3500);
             }
@@ -2166,4 +2273,5 @@
         });
     </script>
 </body>
+
 </html>
