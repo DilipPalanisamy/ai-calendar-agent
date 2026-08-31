@@ -299,12 +299,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Session Middleware for secure session token storage
+# Session Middleware for secure session token storage (60-day persistent session)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
     session_cookie="ai_calendar_session",
-    max_age=14 * 24 * 3600,  # 14 days
+    max_age=60 * 24 * 3600,  # 60 days persistent session
     same_site="lax",
     https_only=IS_PRODUCTION,
 )
