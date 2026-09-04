@@ -1524,90 +1524,6 @@
             transform: translateX(-50%) translateY(0);
         }
 
-        /* ----------------------------------------------------
-           Mobile App Bottom Navigation Bar
-           ---------------------------------------------------- */
-        .mobile-bottom-nav {
-            display: none;
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 64px;
-            background: rgba(11, 15, 23, 0.96);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            z-index: 40;
-            padding: 0 0.5rem;
-            padding-bottom: env(safe-area-inset-bottom);
-            align-items: center;
-            justify-content: space-around;
-        }
-
-        .mobile-nav-btn {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 4px;
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.68rem;
-            font-weight: 600;
-            cursor: pointer;
-            padding: 6px 0;
-            border-radius: 10px;
-            transition: all 0.2s ease;
-        }
-
-        .mobile-nav-btn i {
-            font-size: 1.15rem;
-            transition: transform 0.2s ease, color 0.2s ease;
-        }
-
-        .mobile-nav-btn.active,
-        .mobile-nav-btn:hover {
-            color: #818cf8;
-        }
-
-        .mobile-nav-btn.active i {
-            color: #818cf8;
-            transform: scale(1.1);
-        }
-
-        /* Mobile View Toggle Button in Header */
-        .btn-mobile-view-toggle {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            color: var(--text-secondary);
-            padding: 6px 12px;
-            min-height: 38px;
-            border-radius: 20px;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.8rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .btn-mobile-view-toggle:hover {
-            background: rgba(255, 255, 255, 0.12);
-            color: #ffffff;
-            border-color: rgba(255, 255, 255, 0.22);
-        }
-
-        .btn-mobile-view-toggle.active {
-            background: rgba(99, 102, 241, 0.25);
-            border-color: #6366f1;
-            color: #c7d2fe;
-        }
 
         /* Search Badge & Glow Animations */
         .input-search-badge {
@@ -1651,91 +1567,6 @@
             border-color: #818cf8 !important;
         }
 
-        /* Standalone Installed App Media Query (Hides install button when already running as app) */
-        @media all and (display-mode: standalone),
-        (display-mode: fullscreen),
-        (display-mode: minimal-ui) {
-            #m-nav-app {
-                display: none !important;
-            }
-        }
-
-        /* Responsive Mobile Type Rules */
-        @media (max-width: 768px) {
-            .mobile-bottom-nav {
-                display: flex;
-            }
-
-            .chat-viewport {
-                padding-bottom: 145px !important;
-            }
-
-            .chat-input-area {
-                position: fixed;
-                bottom: 60px;
-                left: 0;
-                right: 0;
-                width: 100%;
-                padding: 0.5rem 0.75rem;
-                padding-bottom: 0.5rem;
-                background: linear-gradient(to top, rgba(11, 15, 23, 0.98) 80%, rgba(11, 15, 23, 0.7) 100%);
-                backdrop-filter: blur(16px);
-                -webkit-backdrop-filter: blur(16px);
-                border-top: 1px solid rgba(255, 255, 255, 0.08);
-                z-index: 38;
-                box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
-                display: flex;
-                transition: transform 0.25s ease, opacity 0.2s ease, box-shadow 0.25s ease;
-            }
-
-            .main-corner-legal {
-                display: none;
-            }
-
-            .btn-mobile-view-toggle {
-                display: none;
-            }
-        }
-
-        /* Simulated Mobile App Mode on Desktop */
-        body.mobile-app-mode .app-container {
-            max-width: 440px;
-            margin: 0 auto;
-            border-left: 1px solid rgba(255, 255, 255, 0.1);
-            border-right: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
-        }
-
-        body.mobile-app-mode .mobile-bottom-nav {
-            display: flex;
-            max-width: 440px;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-
-        body.mobile-app-mode .chat-viewport {
-            padding-bottom: 145px !important;
-        }
-
-        body.mobile-app-mode .chat-input-area {
-            position: fixed;
-            bottom: 60px;
-            max-width: 440px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 100%;
-            padding: 0.5rem 0.75rem;
-            background: linear-gradient(to top, rgba(11, 15, 23, 0.98) 80%, rgba(11, 15, 23, 0.7) 100%);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            z-index: 38;
-            display: flex;
-        }
-
-        body.mobile-app-mode .btn-sidebar-toggle {
-            display: flex;
-        }
     </style>
 </head>
 
@@ -1818,13 +1649,8 @@
                     <h2 class="chat-header-title" id="current-chat-title">AI Assistant</h2>
                 </div>
 
-                <!-- Right Header Actions (Mobile View Toggle & Multi-Account Switcher) -->
+                <!-- Right Header Actions (Multi-Account Switcher) -->
                 <div class="chat-header-actions">
-                    <button class="btn-mobile-view-toggle" id="btn-mobile-view-toggle"
-                        title="Toggle Mobile App Layout Mode">
-                        <i class="fa-solid fa-mobile-screen"></i>
-                        <span class="mobile-toggle-text">Mobile View</span>
-                    </button>
 
                     <!-- Multi-Account Switcher Dropdown -->
                     <div class="account-switcher-box" id="account-switcher-box">
@@ -1913,29 +1739,6 @@
                 </div>
             </div>
 
-            <!-- Mobile App Bottom Navigation Bar -->
-            <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
-                <button class="mobile-nav-btn active" id="m-nav-chat" title="Chat Assistant">
-                    <i class="fa-solid fa-comments"></i>
-                    <span>Chat</span>
-                </button>
-                <button class="mobile-nav-btn" id="m-nav-new" title="Start New Chat">
-                    <i class="fa-solid fa-plus-circle"></i>
-                    <span>New</span>
-                </button>
-                <button class="mobile-nav-btn" id="m-nav-events" title="Upcoming Calendar Events">
-                    <i class="fa-solid fa-calendar-check"></i>
-                    <span>Events</span>
-                </button>
-                <button class="mobile-nav-btn" id="m-nav-gmail" title="Scan Gmail Invites">
-                    <i class="fa-solid fa-envelope-open-text"></i>
-                    <span>Gmail</span>
-                </button>
-                <button class="mobile-nav-btn" id="m-nav-app" title="Install App on Mobile Device">
-                    <i class="fa-solid fa-mobile-screen"></i>
-                    <span>Install App</span>
-                </button>
-            </nav>
 
             <!-- Corner Legal Links -->
             <div class="main-corner-legal" id="main-corner-legal">
@@ -2978,82 +2781,6 @@
                 inputSearchBadge.addEventListener('click', () => chatInput.focus());
             }
 
-            // Mobile Bottom Navigation Bar Listeners
-            const mNavChat = document.getElementById('m-nav-chat');
-            const mNavNew = document.getElementById('m-nav-new');
-            const mNavEvents = document.getElementById('m-nav-events');
-            const mNavGmail = document.getElementById('m-nav-gmail');
-            const mNavApp = document.getElementById('m-nav-app');
-
-            if (mNavChat) {
-                mNavChat.addEventListener('click', () => {
-                    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
-                    mNavChat.classList.add('active');
-
-                    // Make the search & message input bar appear prominently above the bottom nav
-                    const inputArea = document.getElementById('chat-input-area');
-                    if (inputArea) {
-                        inputArea.style.display = 'flex';
-                        inputArea.classList.add('search-focus-glow');
-                        setTimeout(() => inputArea.classList.remove('search-focus-glow'), 800);
-                    }
-
-                    if (chatInput) {
-                        chatInput.focus();
-                        scrollToBottom();
-                    }
-                });
-            }
-
-            if (mNavNew) {
-                mNavNew.addEventListener('click', () => {
-                    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
-                    mNavNew.classList.add('active');
-                    const newChat = document.getElementById('new-chat-btn');
-                    if (newChat) newChat.click();
-                    setTimeout(() => {
-                        document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
-                        if (mNavChat) mNavChat.classList.add('active');
-                    }, 400);
-                });
-            }
-
-            if (mNavEvents) {
-                mNavEvents.addEventListener('click', () => {
-                    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
-                    mNavEvents.classList.add('active');
-                    chatInput.value = "What are my upcoming events on Google Calendar?";
-                    sendMessage();
-                });
-            }
-
-            if (mNavGmail) {
-                mNavGmail.addEventListener('click', () => {
-                    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
-                    mNavGmail.classList.add('active');
-                    chatInput.value = "Scan my Gmail inbox for upcoming meeting and coffee invitations";
-                    sendMessage();
-                });
-            }
-
-            // Single Install App Trigger for Mobile Device
-            if (mNavApp) {
-                mNavApp.addEventListener('click', () => {
-                    installOnMobileDevice();
-                });
-            }
-
-            // Mobile Mode Simulator Toggle (Desktop)
-            const btnMobileToggle = document.getElementById('btn-mobile-view-toggle');
-            if (btnMobileToggle) {
-                btnMobileToggle.addEventListener('click', () => {
-                    document.body.classList.toggle('mobile-app-mode');
-                    btnMobileToggle.classList.toggle('active');
-                    const isMobile = document.body.classList.contains('mobile-app-mode');
-                    const label = btnMobileToggle.querySelector('.mobile-toggle-text');
-                    if (label) label.textContent = isMobile ? 'Desktop View' : 'Mobile View';
-                });
-            }
 
             // Mobile Install Sheet Dismiss Listeners
             const sheetCloseBtn = document.getElementById('sheet-close-btn');
