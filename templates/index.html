@@ -1379,6 +1379,7 @@
             .btn-get-app-header {
                 padding: 6px 10px;
             }
+
             .get-app-btn-text {
                 display: none;
             }
@@ -1428,6 +1429,7 @@
                 opacity: 0;
                 transform: scale(0.94) translateY(12px);
             }
+
             to {
                 opacity: 1;
                 transform: scale(1) translateY(0);
@@ -1513,6 +1515,7 @@
             .entry-modal-options {
                 grid-template-columns: 1fr;
             }
+
             .app-entry-modal-card {
                 padding: 1.75rem 1.25rem;
             }
@@ -1866,19 +1869,24 @@
             .mobile-bottom-nav {
                 display: flex;
             }
+
             .mobile-install-banner {
                 display: flex;
             }
+
             .chat-viewport {
                 padding-bottom: 78px !important;
             }
+
             .chat-input-area {
                 bottom: 64px;
                 padding: 0.5rem 0.75rem;
             }
+
             .main-corner-legal {
                 display: none;
             }
+
             .btn-mobile-view-toggle {
                 display: none;
             }
@@ -1892,21 +1900,26 @@
             border-right: 1px solid rgba(255, 255, 255, 0.1);
             box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
         }
+
         body.mobile-app-mode .mobile-bottom-nav {
             display: flex;
             max-width: 440px;
             left: 50%;
             transform: translateX(-50%);
         }
+
         body.mobile-app-mode .mobile-install-banner {
             display: flex;
         }
+
         body.mobile-app-mode .chat-viewport {
             padding-bottom: 78px !important;
         }
+
         body.mobile-app-mode .chat-input-area {
             bottom: 64px;
         }
+
         body.mobile-app-mode .btn-sidebar-toggle {
             display: flex;
         }
@@ -2015,12 +2028,14 @@
 
                 <!-- Right Header Actions (Mobile View Toggle, Get App Button & Multi-Account Switcher) -->
                 <div class="chat-header-actions">
-                    <button class="btn-mobile-view-toggle" id="btn-mobile-view-toggle" title="Toggle Mobile App Layout Mode">
+                    <button class="btn-mobile-view-toggle" id="btn-mobile-view-toggle"
+                        title="Toggle Mobile App Layout Mode">
                         <i class="fa-solid fa-mobile-screen"></i>
                         <span class="mobile-toggle-text">Mobile View</span>
                     </button>
 
-                    <button class="btn-get-app-header" id="btn-get-app-header" title="Download & Install AI Calendar Assistant on Mobile or Laptop">
+                    <button class="btn-get-app-header" id="btn-get-app-header"
+                        title="Download & Install AI Calendar Assistant on Mobile or Laptop">
                         <i class="fa-solid fa-cloud-arrow-down"></i>
                         <span class="get-app-btn-text">Get App</span>
                     </button>
@@ -2149,6 +2164,74 @@
         let isProcessing = false;
         let currentAbortController = null;
         let activeAccountEmail = "{{ user_email }}";
+        let currentSessionMessages = [];
+
+        // ----------------------------------------------------
+        // Active Session & Client Cache Management
+        // ----------------------------------------------------
+        function getActiveSessionKey() {
+            return 'ai_calendar_active_session_' + (activeAccountEmail || 'default');
+        }
+
+        function getCachedChatKey() {
+            return 'ai_calendar_cached_chat_' + (activeAccountEmail || 'default');
+        }
+
+        function saveSessionCache(sessionId, title, messages) {
+            if (!sessionId) return;
+            try {
+                const payload = {
+                    sessionId: sessionId,
+                    title: title || "Conversation",
+                    messages: Array.isArray(messages) ? messages : [],
+                    userEmail: activeAccountEmail,
+                    savedAt: Date.now()
+                };
+                localStorage.setItem(getCachedChatKey(), JSON.stringify(payload));
+                localStorage.setItem(getActiveSessionKey(), sessionId);
+            } catch (e) {
+                console.warn("Failed caching session:", e);
+            }
+        }
+
+        function clearSessionCache() {
+            try {
+                localStorage.removeItem(getCachedChatKey());
+                localStorage.removeItem(getActiveSessionKey());
+            } catch (e) {
+                console.warn("Failed clearing session cache:", e);
+            }
+        }
+
+        function restoreCachedChatIfAvailable() {
+            try {
+                const raw = localStorage.getItem(getCachedChatKey());
+                if (!raw) return false;
+                const cached = JSON.parse(raw);
+                if (cached && cached.sessionId && Array.isArray(cached.messages) && cached.messages.length > 0) {
+                    if (activeAccountEmail && cached.userEmail && cached.userEmail !== activeAccountEmail) {
+                        return false;
+                    }
+                    activeSessionId = cached.sessionId;
+                    if (currentChatTitle) {
+                        currentChatTitle.textContent = cached.title || "Conversation";
+                    }
+                    currentSessionMessages = [...cached.messages];
+                    if (welcomeScreen) welcomeScreen.style.display = 'none';
+                    if (chatMessages) {
+                        chatMessages.innerHTML = '';
+                        cached.messages.forEach(m => {
+                            appendMessage(m.content, m.sender === 'user' ? 'user' : 'assistant', m.timestamp, false);
+                        });
+                        scrollToBottom();
+                    }
+                    return true;
+                }
+            } catch (e) {
+                console.warn("Failed restoring cached chat:", e);
+            }
+            return false;
+        }
 
         // DOM Elements
         const sidebar = document.getElementById('sidebar');
@@ -2282,8 +2365,8 @@
         }
 
         // Render message into chat container
-        function appendMessage(text, sender = 'assistant', timestamp = null) {
-            welcomeScreen.style.display = 'none';
+        function appendMessage(text, sender = 'assistant', timestamp = null, shouldScroll = true) {
+            if (welcomeScreen) welcomeScreen.style.display = 'none';
 
             let rawString = "";
             if (Array.isArray(text)) {
@@ -2332,8 +2415,10 @@
                 `;
             }
 
-            chatMessages.appendChild(messageRow);
-            scrollToBottom();
+            if (chatMessages) chatMessages.appendChild(messageRow);
+            if (shouldScroll) {
+                scrollToBottom();
+            }
         }
 
         function showThinkingIndicator() {
@@ -2515,8 +2600,13 @@
                 if (res.ok) {
                     activeAccountEmail = email;
                     await loadAccounts();
-                    startNewChat();
-                    loadHistory();
+                    activeSessionId = null;
+                    currentSessionMessages = [];
+                    const restored = restoreCachedChatIfAvailable();
+                    if (!restored) {
+                        startNewChat();
+                    }
+                    await loadHistory(true);
                 }
             } catch (err) {
                 console.error("Failed switching account:", err);
@@ -2541,7 +2631,7 @@
                 }
 
                 await loadAccounts();
-                loadHistory();
+                await loadHistory(true);
             } catch (err) {
                 console.error("Failed removing account:", err);
             }
@@ -2550,7 +2640,7 @@
         // ----------------------------------------------------
         // Chat History API Management
         // ----------------------------------------------------
-        async function loadHistory() {
+        async function loadHistory(autoSelect = true) {
             try {
                 const res = await fetch('/api/history');
                 if (!res.ok) return;
@@ -2566,6 +2656,9 @@
                             <p>No chat history yet for this account.<br>Start a conversation!</p>
                         </div>
                     `;
+                    if (!activeSessionId) {
+                        startNewChat();
+                    }
                     return;
                 }
 
@@ -2586,6 +2679,31 @@
                     `;
                     historyList.appendChild(item);
                 });
+
+                if (autoSelect) {
+                    const savedSessionId = localStorage.getItem(getActiveSessionKey());
+                    let targetId = null;
+
+                    if (savedSessionId && sessions.some(s => s.id === savedSessionId)) {
+                        targetId = savedSessionId;
+                    } else if (activeSessionId && sessions.some(s => s.id === activeSessionId)) {
+                        targetId = activeSessionId;
+                    } else if (sessions.length > 0) {
+                        // Automatically restore the most recent conversation from database
+                        targetId = sessions[0].id;
+                    }
+
+                    if (targetId) {
+                        document.querySelectorAll('.history-item').forEach(el => {
+                            el.classList.toggle('active', el.getAttribute('data-id') === targetId);
+                        });
+                        await selectSession(targetId, false);
+                    }
+                } else {
+                    document.querySelectorAll('.history-item').forEach(el => {
+                        el.classList.toggle('active', el.getAttribute('data-id') === activeSessionId);
+                    });
+                }
             } catch (err) {
                 console.error("Failed loading chat history:", err);
             }
@@ -2608,12 +2726,12 @@
             if (item) {
                 const sessionId = item.getAttribute('data-id');
                 if (sessionId) {
-                    selectSession(sessionId);
+                    selectSession(sessionId, true);
                 }
             }
         });
 
-        async function selectSession(sessionId) {
+        async function selectSession(sessionId, shouldCloseSidebar = true) {
             if (!sessionId) return;
 
             if (isProcessing && currentAbortController) {
@@ -2621,10 +2739,12 @@
             }
 
             activeSessionId = sessionId;
+            localStorage.setItem(getActiveSessionKey(), sessionId);
 
             try {
                 const res = await fetch(`/api/history/${sessionId}`);
                 if (!res.ok) {
+                    clearSessionCache();
                     startNewChat();
                     return;
                 }
@@ -2632,18 +2752,23 @@
                 const data = await res.json();
                 chatMessages.innerHTML = '';
                 welcomeScreen.style.display = 'none';
-                currentChatTitle.textContent = data.session.title || "Conversation";
+                currentChatTitle.textContent = (data.session && data.session.title) ? data.session.title : "Conversation";
 
                 const messages = data.messages || [];
+                currentSessionMessages = [...messages];
                 messages.forEach(m => {
-                    appendMessage(m.content, m.sender === 'user' ? 'user' : 'assistant', m.timestamp);
+                    appendMessage(m.content, m.sender === 'user' ? 'user' : 'assistant', m.timestamp, false);
                 });
+
+                saveSessionCache(sessionId, currentChatTitle.textContent, currentSessionMessages);
 
                 document.querySelectorAll('.history-item').forEach(el => {
                     el.classList.toggle('active', el.getAttribute('data-id') === sessionId);
                 });
 
-                closeSidebar();
+                if (shouldCloseSidebar) {
+                    closeSidebar();
+                }
                 scrollToBottom();
             } catch (err) {
                 console.error("Error loading session:", err);
@@ -2655,6 +2780,8 @@
                 stopGeneration();
             }
             activeSessionId = null;
+            currentSessionMessages = [];
+            clearSessionCache();
             chatMessages.innerHTML = '';
             welcomeScreen.style.display = 'flex';
             currentChatTitle.textContent = "New Chat";
@@ -2676,9 +2803,11 @@
                 const res = await fetch(`/api/history/${sessionId}`, { method: 'DELETE' });
                 if (res.ok) {
                     if (activeSessionId === sessionId) {
-                        startNewChat();
+                        clearSessionCache();
+                        activeSessionId = null;
+                        currentSessionMessages = [];
                     }
-                    loadHistory();
+                    await loadHistory(true);
                     showNotification("🗑️ Chat conversation deleted.");
                 }
             } catch (err) {
@@ -2692,8 +2821,9 @@
             try {
                 const res = await fetch('/api/history', { method: 'DELETE' });
                 if (res.ok) {
+                    clearSessionCache();
                     startNewChat();
-                    loadHistory();
+                    await loadHistory(false);
                     showNotification("🗑️ All chat history cleared.");
                 }
             } catch (err) {
@@ -2853,6 +2983,8 @@
             chatInput.value = '';
             chatInput.style.height = 'auto';
 
+            const userMsgObj = { sender: 'user', content: message, timestamp: new Date().toISOString() };
+            currentSessionMessages.push(userMsgObj);
             appendMessage(message, 'user');
             showThinkingIndicator();
 
@@ -2887,12 +3019,21 @@
                 }
 
                 activeSessionId = data.session_id || activeSessionId;
+                localStorage.setItem(getActiveSessionKey(), activeSessionId);
+
                 if (data.title) {
                     currentChatTitle.textContent = data.title;
                 }
 
-                appendMessage(data.response || "No response received.", 'assistant');
-                loadHistory();
+                const botMsgText = data.response || "No response received.";
+                const botMsgObj = { sender: 'assistant', content: botMsgText, timestamp: new Date().toISOString() };
+                currentSessionMessages.push(botMsgObj);
+
+                appendMessage(botMsgText, 'assistant');
+                saveSessionCache(activeSessionId, currentChatTitle.textContent, currentSessionMessages);
+
+                // Update history sidebar list without switching active conversation
+                loadHistory(false);
 
             } catch (err) {
                 removeThinkingIndicator();
@@ -3164,8 +3305,9 @@
 
         // Initialize on Page Load
         document.addEventListener('DOMContentLoaded', () => {
+            restoreCachedChatIfAvailable();
             loadAccounts();
-            loadHistory();
+            loadHistory(true);
             chatInput.focus();
             initAppInstallListeners();
             checkFirstTimeVisitor();
@@ -3183,8 +3325,9 @@
                 <span class="sparkle-dot"></span>
             </div>
             <h2 class="entry-modal-title">AI Calendar Assistant</h2>
-            <p class="entry-modal-desc">Manage schedules, Google Calendar events, and scan Gmail invitations with Gemini AI.</p>
-            
+            <p class="entry-modal-desc">Manage schedules, Google Calendar events, and scan Gmail invitations with Gemini
+                AI.</p>
+
             <div class="entry-modal-options">
                 <!-- Option 1: Get App -->
                 <div class="entry-option-card entry-option-app" id="card-get-app">
@@ -3193,9 +3336,10 @@
                         <i class="fa-solid fa-cloud-arrow-down"></i>
                     </div>
                     <div class="entry-option-title">Get App</div>
-                    <div class="entry-option-subtitle">Download app with index.html or install directly to your mobile home screen & desktop</div>
+                    <div class="entry-option-subtitle">Download app with index.html or install directly to your mobile
+                        home screen & desktop</div>
                     <button class="btn-entry-action btn-entry-app" id="btn-modal-get-app">
-                        <i class="fa-solid fa-cloud-arrow-down"></i> Get App (index.html)
+                        <i class="fa-solid fa-cloud-arrow-down"></i> Get the app
                     </button>
                 </div>
 
@@ -3205,7 +3349,8 @@
                         <i class="fa-solid fa-globe"></i>
                     </div>
                     <div class="entry-option-title">Open in Web</div>
-                    <div class="entry-option-subtitle">Continue directly in your browser with full calendar & Gmail assistant features</div>
+                    <div class="entry-option-subtitle">Continue directly in your browser with full calendar & Gmail
+                        assistant features</div>
                     <button class="btn-entry-action btn-entry-web" id="btn-modal-open-web">
                         Open in Web <i class="fa-solid fa-arrow-right"></i>
                     </button>
@@ -3225,37 +3370,48 @@
                 <span class="sparkle-dot"></span>
             </div>
             <h2 class="entry-modal-title">AI Calendar Assistant App</h2>
-            <p class="entry-modal-desc">Your app package (<strong>AI-Calendar-Assistant.html</strong>) is ready with <strong>index.html</strong> interface! Choose how to run or install:</p>
+            <p class="entry-modal-desc">Your app package (<strong>AI-Calendar-Assistant.html</strong>) is ready with
+                <strong>index.html</strong> interface! Choose how to run or install:</p>
 
             <div class="download-guide-grid">
                 <!-- Mobile Guide -->
                 <div class="download-guide-box">
                     <h4><i class="fa-solid fa-mobile-screen"></i> For Mobile Phone</h4>
-                    <p>• <strong>Open downloaded App:</strong> Tap the downloaded <code>AI-Calendar-Assistant.html</code> to run index.html directly.</p>
-                    <p>• <strong>Android Install:</strong> Tap <strong>Install Mobile App</strong> below or browser menu (⋮) > <strong>Add to Home screen</strong>.</p>
-                    <p>• <strong>iPhone / Safari:</strong> Tap <strong>Share</strong> (<i class="fa-solid fa-arrow-up-from-bracket"></i>) > <strong>Add to Home Screen</strong>.</p>
+                    <p>• <strong>Open downloaded App:</strong> Tap the downloaded
+                        <code>AI-Calendar-Assistant.html</code> to run index.html directly.</p>
+                    <p>• <strong>Android Install:</strong> Tap <strong>Install Mobile App</strong> below or browser menu
+                        (⋮) > <strong>Add to Home screen</strong>.</p>
+                    <p>• <strong>iPhone / Safari:</strong> Tap <strong>Share</strong> (<i
+                            class="fa-solid fa-arrow-up-from-bracket"></i>) > <strong>Add to Home Screen</strong>.</p>
                 </div>
 
                 <!-- Laptop / PC Guide -->
                 <div class="download-guide-box">
                     <h4><i class="fa-solid fa-laptop"></i> For Laptop / Desktop</h4>
-                    <p>• <strong>Run App:</strong> Double-click the downloaded <code>AI-Calendar-Assistant.html</code> file on your computer.</p>
-                    <p>• <strong>Install Standalone:</strong> Click <strong>Install in Browser</strong> or the address bar install icon.</p>
-                    <p>• <strong>Windows Setup:</strong> Download the <code>.bat</code> setup to create a desktop shortcut.</p>
+                    <p>• <strong>Run App:</strong> Double-click the downloaded <code>AI-Calendar-Assistant.html</code>
+                        file on your computer.</p>
+                    <p>• <strong>Install Standalone:</strong> Click <strong>Install in Browser</strong> or the address
+                        bar install icon.</p>
+                    <p>• <strong>Windows Setup:</strong> Download the <code>.bat</code> setup to create a desktop
+                        shortcut.</p>
                 </div>
             </div>
 
             <div class="download-guide-actions">
-                <a href="/download/app" class="btn-entry-action btn-entry-app" id="btn-dialog-redownload-html" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
+                <a href="/download/app" class="btn-entry-action btn-entry-app" id="btn-dialog-redownload-html"
+                    style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
                     <i class="fa-solid fa-download"></i> Download App (index.html)
                 </a>
-                <button class="btn-entry-action btn-entry-app" id="btn-dialog-install-native" style="display: none; width: auto; padding: 0.75rem 1.4rem;">
+                <button class="btn-entry-action btn-entry-app" id="btn-dialog-install-native"
+                    style="display: none; width: auto; padding: 0.75rem 1.4rem;">
                     <i class="fa-solid fa-arrow-down-to-bracket"></i> Install in Browser / Mobile
                 </button>
-                <a href="/download/app?format=bat" class="btn-entry-action btn-entry-web" id="btn-dialog-redownload-bat" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
+                <a href="/download/app?format=bat" class="btn-entry-action btn-entry-web" id="btn-dialog-redownload-bat"
+                    style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
                     <i class="fa-solid fa-laptop"></i> Windows Setup (.bat)
                 </a>
-                <button class="btn-entry-action btn-entry-web" id="btn-dialog-done" style="width: auto; padding: 0.75rem 1.4rem;">
+                <button class="btn-entry-action btn-entry-web" id="btn-dialog-done"
+                    style="width: auto; padding: 0.75rem 1.4rem;">
                     Done
                 </button>
             </div>

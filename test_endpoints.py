@@ -154,9 +154,49 @@ def test_endpoints():
     assert len(get_user_chat_sessions(user_a)) == 0
     assert len(get_user_chat_sessions(user_b)) == 1, "Isolation violation: Deleting User A cleared User B's data!"
 
+    # Test Session Persistence across Logout and Relogin
+    print("Testing Chat History Persistence across Logout and Relogin...", flush=True)
+    user_c = "persistent_user@gmail.com"
+    delete_all_user_sessions(user_c)
+
+    # 1. User C starts a conversation
+    s_c1 = create_chat_session(user_c, "Project Roadmap Discussion")
+    save_chat_message(s_c1, "user", "What are our milestones for Q3?", user_c)
+    save_chat_message(s_c1, "assistant", "Milestone 1 is deployment by September.", user_c)
+
+    # 2. User C sends a second message in the same session
+    save_chat_message(s_c1, "user", "Add follow-up sync tomorrow at 10 AM", user_c)
+    save_chat_message(s_c1, "assistant", "Scheduled follow-up sync for tomorrow at 10:00 AM IST.", user_c)
+
+    # 3. User C simulates Logout (clears HTTP session)
+    res_logout_c = client.get("/logout", follow_redirects=False)
+    assert res_logout_c.status_code == 303
+
+    # 4. Verify SQLite database still contains all sessions and messages for User C
+    sessions_after_logout = get_user_chat_sessions(user_c)
+    assert len(sessions_after_logout) == 1, f"Expected 1 session after logout, found {len(sessions_after_logout)}"
+    assert sessions_after_logout[0]["id"] == s_c1
+
+    details = get_chat_session_details(s_c1, user_c)
+    assert details is not None
+    assert len(details["messages"]) == 4, f"Expected 4 messages, found {len(details['messages'])}"
+    assert details["messages"][0]["content"] == "What are our milestones for Q3?"
+    assert details["messages"][3]["content"] == "Scheduled follow-up sync for tomorrow at 10:00 AM IST."
+
+    # 5. User C creates a second newer session
+    s_c2 = create_chat_session(user_c, "Lunch Meeting with Team")
+    save_chat_message(s_c2, "user", "Book lunch at noon", user_c)
+    save_chat_message(s_c2, "assistant", "Lunch booked for 12:00 PM IST.", user_c)
+
+    # Verify latest session is returned first for auto-loading on page refresh / login
+    ordered_sessions = get_user_chat_sessions(user_c)
+    assert len(ordered_sessions) == 2
+    assert ordered_sessions[0]["id"] == s_c2, "Latest session must be at index 0 for auto-selection"
+
+    # Clean up test user
+    delete_all_user_sessions(user_c)
     delete_all_user_sessions(user_b)
-    assert len(get_user_chat_sessions(user_b)) == 0
-    print("[PASS] Multi-User Chat History Isolation verified 100%!", flush=True)
+    print("[PASS] Chat History Persistence across Logout and Relogin verified 100%!", flush=True)
 
     print("\n==========================================", flush=True)
     print("ALL FASTAPI & MULTI-ACCOUNT TESTS PASSED 100%!", flush=True)
