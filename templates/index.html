@@ -1332,357 +1332,189 @@
             flex-shrink: 0;
         }
 
-        .btn-get-app-header {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.45rem;
-            background: linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(139, 92, 246, 0.22) 100%);
-            border: 1px solid rgba(139, 92, 246, 0.45);
-            color: #c7d2fe;
-            padding: 6px 14px;
-            min-height: 38px;
-            border-radius: 20px;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.82rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-            position: relative;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.15);
-        }
-
-        .btn-get-app-header:hover {
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            border-color: transparent;
-            color: #ffffff;
-            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.45);
-            transform: translateY(-1px);
-        }
-
-        .btn-get-app-header:active {
-            transform: translateY(1px);
-            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
-        }
-
-        .btn-get-app-header i {
-            font-size: 0.88rem;
-            color: #a5b4fc;
-            transition: color 0.2s ease;
-        }
-
-        .btn-get-app-header:hover i {
-            color: #ffffff;
-        }
-
-        @media (max-width: 580px) {
-            .btn-get-app-header {
-                padding: 6px 10px;
-            }
-
-            .get-app-btn-text {
-                display: none;
-            }
-        }
-
-        /* ----------------------------------------------------
-           First-Time App Choice Modal & Download Dialog
-           ---------------------------------------------------- */
-        .app-entry-modal-overlay,
-        .app-download-dialog-overlay {
+        /* Mobile Install Sheet Overlay (iOS / Fallback mobile instructions) */
+        .mobile-install-sheet-overlay {
             position: fixed;
             inset: 0;
             background: rgba(4, 7, 13, 0.78);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             display: flex;
-            align-items: center;
+            align-items: flex-end;
             justify-content: center;
-            padding: 1.25rem;
+            padding: 1rem;
+            padding-bottom: calc(1rem + env(safe-area-inset-bottom));
             z-index: 9999;
             opacity: 1;
-            transition: opacity 0.25s ease;
+            transition: opacity 0.2s ease;
         }
 
-        .app-entry-modal-overlay.fade-out,
-        .app-download-dialog-overlay.fade-out {
+        .mobile-install-sheet-overlay.fade-out {
             opacity: 0;
             pointer-events: none;
         }
 
-        .app-entry-modal-card,
-        .app-download-dialog-card {
-            background: linear-gradient(160deg, rgba(26, 34, 52, 0.96) 0%, rgba(13, 19, 33, 0.98) 100%);
-            border: 1px solid rgba(139, 92, 246, 0.28);
-            border-radius: 24px;
-            padding: 2.25rem 2rem;
-            max-width: 520px;
+        .mobile-install-sheet-card {
+            background: linear-gradient(160deg, rgba(26, 34, 52, 0.98) 0%, rgba(13, 19, 33, 0.99) 100%);
+            border: 1px solid rgba(139, 92, 246, 0.35);
+            border-radius: 22px;
+            padding: 1.5rem 1.25rem;
+            max-width: 420px;
             width: 100%;
             text-align: center;
             position: relative;
-            box-shadow: 0 30px 70px -15px rgba(0, 0, 0, 0.8), 0 0 50px -10px rgba(99, 102, 241, 0.25);
-            animation: modalPopIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.7), 0 0 30px rgba(99, 102, 241, 0.2);
+            animation: sheetSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        @keyframes modalPopIn {
-            from {
-                opacity: 0;
-                transform: scale(0.94) translateY(12px);
-            }
-
-            to {
-                opacity: 1;
-                transform: scale(1) translateY(0);
-            }
+        @keyframes sheetSlideUp {
+            from { transform: translateY(30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
 
-        .entry-modal-close {
+        .sheet-close-btn {
             position: absolute;
-            top: 1rem;
-            right: 1rem;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: var(--text-secondary);
-            width: 32px;
-            height: 32px;
+            top: 0.9rem;
+            right: 0.9rem;
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            color: #94a3b8;
+            width: 30px;
+            height: 30px;
             border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.9rem;
-            transition: all 0.2s ease;
-        }
-
-        .entry-modal-close:hover {
-            background: rgba(255, 255, 255, 0.12);
-            color: #ffffff;
-            transform: scale(1.05);
-        }
-
-        .entry-modal-icon-badge {
-            width: 64px;
-            height: 64px;
-            margin: 0 auto 1.1rem;
-            border-radius: 20px;
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.85rem;
-            color: #ffffff;
-            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.45);
-            position: relative;
-        }
-
-        .entry-modal-icon-badge .sparkle-dot {
-            position: absolute;
-            top: -4px;
-            right: -4px;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: #38bdf8;
-            border: 2px solid #0b0f17;
-            box-shadow: 0 0 10px #38bdf8;
-        }
-
-        .entry-modal-title {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 1.45rem;
-            font-weight: 700;
-            color: #ffffff;
-            margin-bottom: 0.5rem;
-            letter-spacing: -0.01em;
-        }
-
-        .entry-modal-desc {
-            font-size: 0.88rem;
-            color: #9ca3af;
-            line-height: 1.5;
-            margin-bottom: 1.65rem;
-            padding: 0 0.5rem;
-        }
-
-        .entry-modal-options {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            text-align: left;
-        }
-
-        @media (max-width: 500px) {
-            .entry-modal-options {
-                grid-template-columns: 1fr;
-            }
-
-            .app-entry-modal-card {
-                padding: 1.75rem 1.25rem;
-            }
-        }
-
-        .entry-option-card {
-            background: rgba(17, 24, 39, 0.65);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 18px;
-            padding: 1.25rem 1rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            position: relative;
-            transition: all 0.25s ease;
-            cursor: pointer;
-        }
-
-        .entry-option-card:hover {
-            transform: translateY(-2px);
-            border-color: rgba(139, 92, 246, 0.4);
-            background: rgba(25, 34, 53, 0.8);
-            box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.4);
-        }
-
-        .entry-option-app {
-            border-color: rgba(99, 102, 241, 0.35);
-            background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(17, 24, 39, 0.8) 100%);
-        }
-
-        .entry-option-badge {
-            position: absolute;
-            top: -10px;
-            right: 14px;
-            background: linear-gradient(135deg, #6366f1, #8b5cf6);
-            color: #ffffff;
-            font-size: 0.65rem;
-            font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 9999px;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            box-shadow: 0 4px 10px rgba(99, 102, 241, 0.35);
-        }
-
-        .entry-option-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.06);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.15rem;
-            margin-bottom: 0.85rem;
-            color: #c7d2fe;
-        }
-
-        .entry-option-app .entry-option-icon {
-            background: rgba(99, 102, 241, 0.2);
-            color: #a5b4fc;
-        }
-
-        .entry-option-title {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 1.05rem;
-            font-weight: 700;
-            color: #ffffff;
-            margin-bottom: 0.3rem;
-        }
-
-        .entry-option-subtitle {
-            font-size: 0.78rem;
-            color: #9ca3af;
-            line-height: 1.4;
-            margin-bottom: 1.1rem;
-            flex-grow: 1;
-        }
-
-        .btn-entry-action {
-            width: 100%;
-            padding: 0.65rem 0.85rem;
-            border-radius: 12px;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-weight: 600;
             font-size: 0.85rem;
-            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .sheet-close-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+        }
+
+        .sheet-icon-badge {
+            width: 52px;
+            height: 52px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 0.45rem;
-            transition: all 0.2s ease;
-            border: none;
-        }
-
-        .btn-entry-app {
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            font-size: 1.45rem;
             color: #ffffff;
-            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+            margin-bottom: 0.8rem;
+            box-shadow: 0 8px 20px rgba(99, 102, 241, 0.35);
         }
 
-        .btn-entry-app:hover {
-            box-shadow: 0 6px 22px rgba(99, 102, 241, 0.55);
-            transform: scale(1.02);
-        }
-
-        .btn-entry-web {
-            background: rgba(255, 255, 255, 0.08);
-            color: #e2e8f0;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-        }
-
-        .btn-entry-web:hover {
-            background: rgba(255, 255, 255, 0.15);
-            color: #ffffff;
-            border-color: rgba(255, 255, 255, 0.25);
-        }
-
-        /* Download Guide Dialog */
-        .download-guide-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            margin: 1.25rem 0;
-            text-align: left;
-        }
-
-        @media (max-width: 520px) {
-            .download-guide-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        .download-guide-box {
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 16px;
-            padding: 1rem;
-        }
-
-        .download-guide-box h4 {
+        .sheet-title {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.9rem;
-            color: #e2e8f0;
-            display: flex;
-            align-items: center;
-            gap: 0.45rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .download-guide-box h4 i {
-            color: #818cf8;
-        }
-
-        .download-guide-box p {
-            font-size: 0.77rem;
-            color: #94a3b8;
-            line-height: 1.45;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #ffffff;
             margin-bottom: 0.4rem;
         }
 
-        .download-guide-actions {
+        .sheet-desc {
+            font-size: 0.82rem;
+            color: #94a3b8;
+            margin-bottom: 1rem;
+            line-height: 1.45;
+        }
+
+        .sheet-steps {
             display: flex;
+            flex-direction: column;
             gap: 0.65rem;
+            text-align: left;
+            margin-bottom: 1.25rem;
+        }
+
+        .sheet-step-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 0.7rem 0.85rem;
+        }
+
+        .sheet-step-num {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #6366f1;
+            color: #ffffff;
+            font-size: 0.75rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
             justify-content: center;
-            margin-top: 1.25rem;
-            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        .sheet-step-text {
+            font-size: 0.8rem;
+            color: #e2e8f0;
+            line-height: 1.35;
+        }
+
+        .sheet-step-text strong {
+            color: #ffffff;
+        }
+
+        .sheet-step-text i {
+            color: #818cf8;
+            margin: 0 2px;
+        }
+
+        .btn-sheet-done {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: #ffffff;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-weight: 600;
+            font-size: 0.88rem;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+            transition: all 0.2s ease;
+        }
+
+        .btn-sheet-done:hover {
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6);
+            transform: translateY(-1px);
+        }
+
+        /* Mobile Toast */
+        .mobile-toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(17, 24, 39, 0.95);
+            border: 1px solid rgba(139, 92, 246, 0.45);
+            color: #ffffff;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.82rem;
+            font-weight: 600;
+            padding: 0.65rem 1.3rem;
+            border-radius: 9999px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+            z-index: 10000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+        }
+
+        .mobile-toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
         }
 
         /* ----------------------------------------------------
@@ -1738,100 +1570,6 @@
         .mobile-nav-btn.active i {
             color: #818cf8;
             transform: scale(1.1);
-        }
-
-        /* Mobile Install Banner */
-        .mobile-install-banner {
-            display: none;
-            background: linear-gradient(135deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.98) 100%);
-            border-bottom: 1px solid rgba(99, 102, 241, 0.35);
-            padding: 0.6rem 1rem;
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.75rem;
-            z-index: 35;
-        }
-
-        .mobile-banner-left {
-            display: flex;
-            align-items: center;
-            gap: 0.65rem;
-            overflow: hidden;
-        }
-
-        .mobile-banner-icon {
-            width: 34px;
-            height: 34px;
-            border-radius: 10px;
-            background: var(--accent-gradient);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 0.95rem;
-            flex-shrink: 0;
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
-        }
-
-        .mobile-banner-text {
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .mobile-banner-title {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.82rem;
-            font-weight: 700;
-            color: #ffffff;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .mobile-banner-sub {
-            font-size: 0.7rem;
-            color: #94a3b8;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .mobile-banner-actions {
-            display: flex;
-            align-items: center;
-            gap: 0.45rem;
-            flex-shrink: 0;
-        }
-
-        .btn-banner-install {
-            background: var(--accent-gradient);
-            color: #ffffff;
-            border: none;
-            padding: 0.38rem 0.85rem;
-            border-radius: 9999px;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.76rem;
-            font-weight: 700;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
-            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35);
-        }
-
-        .btn-banner-close {
-            background: rgba(255, 255, 255, 0.08);
-            border: none;
-            color: var(--text-muted);
-            width: 26px;
-            height: 26px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: 0.75rem;
         }
 
         /* Mobile View Toggle Button in Header */
@@ -1898,13 +1636,9 @@
             border-color: #818cf8 !important;
         }
 
-        /* Standalone Installed App Media Query (Hides install banner & prompts) */
+        /* Standalone Installed App Media Query (Hides install button when already running as app) */
         @media all and (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
-            .mobile-install-banner,
-            #mobile-install-banner,
-            #btn-get-app-header,
-            #m-nav-app,
-            .app-entry-modal-overlay {
+            #m-nav-app {
                 display: none !important;
             }
         }
@@ -2058,27 +1792,6 @@
 
         <!-- Main Chat Area -->
         <main class="main-content">
-            <!-- Mobile Quick Install Banner -->
-            <div class="mobile-install-banner" id="mobile-install-banner">
-                <div class="mobile-banner-left">
-                    <div class="mobile-banner-icon">
-                        <i class="fa-solid fa-calendar-check"></i>
-                    </div>
-                    <div class="mobile-banner-text">
-                        <div class="mobile-banner-title">AI Calendar Assistant App</div>
-                        <div class="mobile-banner-sub">Install on Mobile or Laptop with index.html</div>
-                    </div>
-                </div>
-                <div class="mobile-banner-actions">
-                    <button class="btn-banner-install" id="btn-banner-install">
-                        <i class="fa-solid fa-download"></i> Install
-                    </button>
-                    <button class="btn-banner-close" id="btn-banner-close" title="Dismiss">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
-                </div>
-            </div>
-
             <!-- Header with Hamburger & Multi-Account Switcher -->
             <header class="chat-header">
                 <div class="chat-header-left">
@@ -2088,18 +1801,12 @@
                     <h2 class="chat-header-title" id="current-chat-title">AI Assistant</h2>
                 </div>
 
-                <!-- Right Header Actions (Mobile View Toggle, Get App Button & Multi-Account Switcher) -->
+                <!-- Right Header Actions (Mobile View Toggle & Multi-Account Switcher) -->
                 <div class="chat-header-actions">
                     <button class="btn-mobile-view-toggle" id="btn-mobile-view-toggle"
                         title="Toggle Mobile App Layout Mode">
                         <i class="fa-solid fa-mobile-screen"></i>
                         <span class="mobile-toggle-text">Mobile View</span>
-                    </button>
-
-                    <button class="btn-get-app-header" id="btn-get-app-header"
-                        title="Download & Install AI Calendar Assistant on Mobile or Laptop">
-                        <i class="fa-solid fa-cloud-arrow-down"></i>
-                        <span class="get-app-btn-text">Get App</span>
                     </button>
 
                     <!-- Multi-Account Switcher Dropdown -->
@@ -2207,9 +1914,9 @@
                     <i class="fa-solid fa-envelope-open-text"></i>
                     <span>Gmail</span>
                 </button>
-                <button class="mobile-nav-btn" id="m-nav-app" title="Download & Install App">
+                <button class="mobile-nav-btn" id="m-nav-app" title="Install App on Mobile Device">
                     <i class="fa-solid fa-mobile-screen"></i>
-                    <span>Get App</span>
+                    <span>Install App</span>
                 </button>
             </nav>
 
@@ -3181,125 +2888,79 @@
             return false;
         }
 
-        function updateInstallBannerVisibility() {
-            const mobileBanner = document.getElementById('mobile-install-banner');
-            if (!mobileBanner) return;
-
-            // If user already installed or dismissed the app, NEVER show top install banner
-            if (isAppAlreadyInstalled()) {
-                mobileBanner.style.setProperty('display', 'none', 'important');
-            } else {
-                const isMobile = (window.innerWidth <= 768) || document.body.classList.contains('mobile-app-mode');
-                if (isMobile) {
-                    mobileBanner.style.display = 'flex';
-                } else {
-                    mobileBanner.style.display = 'none';
-                }
-            }
-        }
-
         // Listen for native PWA installation completion
         window.addEventListener('appinstalled', () => {
             console.log('App installed successfully');
             localStorage.setItem('ai_calendar_app_installed', 'true');
-            updateInstallBannerVisibility();
+            showMobileToast("AI Calendar Assistant installed! Check your home screen.");
         });
 
-        // First-time visitor modal check
-        function checkFirstTimeVisitor() {
-            if (isAppAlreadyInstalled()) return;
-            const hasSeen = localStorage.getItem('ai_calendar_app_prompt_seen');
-            if (!hasSeen) {
-                const entryModal = document.getElementById('app-entry-modal-overlay');
-                if (entryModal) {
-                    entryModal.style.display = 'flex';
-                }
-            }
-        }
-
-        function closeEntryModal() {
-            localStorage.setItem('ai_calendar_app_prompt_seen', 'true');
-            const modal = document.getElementById('app-entry-modal-overlay');
-            if (modal) {
-                modal.classList.add('fade-out');
-                setTimeout(() => {
-                    modal.style.display = 'none';
-                    modal.classList.remove('fade-out');
-                }, 220);
-            }
-        }
-
-        function triggerDirectDownload() {
-            const link = document.createElement('a');
-            link.href = '/download/app';
-            link.setAttribute('download', 'AI-Calendar-Assistant.html');
-            document.body.appendChild(link);
-            link.click();
-            setTimeout(() => {
-                if (document.body.contains(link)) document.body.removeChild(link);
-            }, 500);
-        }
-
-        function showDownloadGuideDialog() {
-            const guideModal = document.getElementById('app-download-dialog-overlay');
-            if (guideModal) {
-                const nativeBtn = document.getElementById('btn-dialog-install-native');
-                if (nativeBtn) {
-                    nativeBtn.style.display = deferredPrompt ? 'inline-flex' : 'none';
-                }
-                guideModal.style.display = 'flex';
-            }
-        }
-
-        function closeDownloadGuideDialog() {
-            localStorage.setItem('ai_calendar_app_installed', 'true');
-            updateInstallBannerVisibility();
-            const guideModal = document.getElementById('app-download-dialog-overlay');
-            if (guideModal) {
-                guideModal.classList.add('fade-out');
-                setTimeout(() => {
-                    guideModal.style.display = 'none';
-                    guideModal.classList.remove('fade-out');
-                }, 220);
-            }
-        }
-
-        function triggerAppInstallation(fromFirstTime = false) {
-            localStorage.setItem('ai_calendar_app_installed', 'true');
-            updateInstallBannerVisibility();
-
-            if (fromFirstTime) {
-                closeEntryModal();
-            }
-
-            // 1. If browser supports native install prompt
+        // Single Mobile Device Installation Handler
+        function installOnMobileDevice() {
+            // 1. If native PWA prompt is ready (Android Chrome, Edge, Samsung Internet, etc.)
             if (deferredPrompt) {
                 deferredPrompt.prompt();
                 deferredPrompt.userChoice.then((choiceResult) => {
-                    console.log('Install outcome:', choiceResult.outcome);
+                    if (choiceResult.outcome === 'accepted') {
+                        localStorage.setItem('ai_calendar_app_installed', 'true');
+                        showMobileToast("Installing to home screen... check your app drawer!");
+                    }
                     deferredPrompt = null;
                 });
+                return;
             }
 
-            // 2. Trigger direct download of the App HTML package
-            triggerDirectDownload();
+            // 2. Check if already installed
+            if (isAppAlreadyInstalled()) {
+                showMobileToast("App is already installed on this device!");
+                return;
+            }
 
-            // 3. Show guide modal with options for mobile and laptop
-            showDownloadGuideDialog();
+            // 3. If iOS Safari or browser where native prompt is not available
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            const sheetModal = document.getElementById('mobile-install-sheet-overlay');
+            const step1 = document.getElementById('sheet-step-1');
+            const step2 = document.getElementById('sheet-step-2');
+
+            if (isIOS) {
+                if (step1) step1.innerHTML = 'Tap the <strong>Share</strong> button <i class="fa-solid fa-arrow-up-from-bracket"></i> in the Safari toolbar.';
+                if (step2) step2.innerHTML = 'Scroll down and select <strong>Add to Home Screen</strong> <i class="fa-solid fa-square-plus"></i>.';
+            } else {
+                if (step1) step1.innerHTML = 'Tap your browser menu <i class="fa-solid fa-ellipsis-vertical"></i> (three dots at top right).';
+                if (step2) step2.innerHTML = 'Select <strong>Install app</strong> or <strong>Add to Home screen</strong> <i class="fa-solid fa-mobile-screen"></i>.';
+            }
+
+            if (sheetModal) {
+                sheetModal.style.display = 'flex';
+            }
         }
 
-        // Attach Event Listeners for App Install & First-Time Prompt
-        function initAppInstallListeners() {
-            // Check & apply install banner state immediately
-            updateInstallBannerVisibility();
-            window.addEventListener('resize', updateInstallBannerVisibility);
-
-            // Header button near Gmail
-            const btnHeader = document.getElementById('btn-get-app-header');
-            if (btnHeader) {
-                btnHeader.addEventListener('click', () => triggerAppInstallation(false));
+        function closeMobileInstallSheet() {
+            const sheetModal = document.getElementById('mobile-install-sheet-overlay');
+            if (sheetModal) {
+                sheetModal.classList.add('fade-out');
+                setTimeout(() => {
+                    sheetModal.style.display = 'none';
+                    sheetModal.classList.remove('fade-out');
+                }, 220);
             }
+        }
 
+        function showMobileToast(msg) {
+            let toast = document.getElementById('mobile-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'mobile-toast';
+                toast.className = 'mobile-toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3200);
+        }
+
+        // Attach Event Listeners for Mobile Install & Navigation
+        function initAppInstallListeners() {
             // Search icon badge inside input wrapper
             const inputSearchBadge = document.getElementById('input-search-badge');
             if (inputSearchBadge && chatInput) {
@@ -3337,7 +2998,6 @@
                 mNavNew.addEventListener('click', () => {
                     document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
                     mNavNew.classList.add('active');
-                    // Click new chat
                     const newChat = document.getElementById('new-chat-btn');
                     if (newChat) newChat.click();
                     setTimeout(() => {
@@ -3365,28 +3025,10 @@
                 });
             }
 
+            // Single Install App Trigger for Mobile Device
             if (mNavApp) {
                 mNavApp.addEventListener('click', () => {
-                    triggerAppInstallation(false);
-                });
-            }
-
-            // Mobile Quick Banner Listeners
-            const btnBannerInstall = document.getElementById('btn-banner-install');
-            const btnBannerClose = document.getElementById('btn-banner-close');
-            const mobileBanner = document.getElementById('mobile-install-banner');
-
-            if (btnBannerInstall) {
-                btnBannerInstall.addEventListener('click', () => {
-                    localStorage.setItem('ai_calendar_app_installed', 'true');
-                    updateInstallBannerVisibility();
-                    triggerAppInstallation(false);
-                });
-            }
-            if (btnBannerClose && mobileBanner) {
-                btnBannerClose.addEventListener('click', () => {
-                    localStorage.setItem('ai_calendar_banner_dismissed', 'true');
-                    mobileBanner.style.setProperty('display', 'none', 'important');
+                    installOnMobileDevice();
                 });
             }
 
@@ -3399,61 +3041,22 @@
                     const isMobile = document.body.classList.contains('mobile-app-mode');
                     const label = btnMobileToggle.querySelector('.mobile-toggle-text');
                     if (label) label.textContent = isMobile ? 'Desktop View' : 'Mobile View';
-                    updateInstallBannerVisibility();
                 });
             }
 
-            // First-time modal buttons
-            const btnModalGetApp = document.getElementById('btn-modal-get-app');
-            const cardGetApp = document.getElementById('card-get-app');
-            if (btnModalGetApp) {
-                btnModalGetApp.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    triggerAppInstallation(true);
-                });
+            // Mobile Install Sheet Dismiss Listeners
+            const sheetCloseBtn = document.getElementById('sheet-close-btn');
+            if (sheetCloseBtn) {
+                sheetCloseBtn.addEventListener('click', closeMobileInstallSheet);
             }
-            if (cardGetApp) {
-                cardGetApp.addEventListener('click', () => triggerAppInstallation(true));
+            const btnSheetDone = document.getElementById('btn-sheet-done');
+            if (btnSheetDone) {
+                btnSheetDone.addEventListener('click', closeMobileInstallSheet);
             }
-
-            const btnModalOpenWeb = document.getElementById('btn-modal-open-web');
-            const cardOpenWeb = document.getElementById('card-open-web');
-            if (btnModalOpenWeb) {
-                btnModalOpenWeb.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    closeEntryModal();
-                });
-            }
-            if (cardOpenWeb) {
-                cardOpenWeb.addEventListener('click', closeEntryModal);
-            }
-
-            const btnEntryClose = document.getElementById('entry-modal-close');
-            if (btnEntryClose) {
-                btnEntryClose.addEventListener('click', closeEntryModal);
-            }
-
-            // Download guide dialog buttons
-            const btnDialogClose = document.getElementById('download-dialog-close');
-            if (btnDialogClose) {
-                btnDialogClose.addEventListener('click', closeDownloadGuideDialog);
-            }
-
-            const btnDialogDone = document.getElementById('btn-dialog-done');
-            if (btnDialogDone) {
-                btnDialogDone.addEventListener('click', closeDownloadGuideDialog);
-            }
-
-            const btnDialogNative = document.getElementById('btn-dialog-install-native');
-            if (btnDialogNative) {
-                btnDialogNative.addEventListener('click', () => {
-                    if (deferredPrompt) {
-                        deferredPrompt.prompt();
-                        deferredPrompt.userChoice.then(() => {
-                            deferredPrompt = null;
-                            btnDialogNative.style.display = 'none';
-                        });
-                    }
+            const sheetOverlay = document.getElementById('mobile-install-sheet-overlay');
+            if (sheetOverlay) {
+                sheetOverlay.addEventListener('click', (e) => {
+                    if (e.target === sheetOverlay) closeMobileInstallSheet();
                 });
             }
         }
@@ -3465,111 +3068,31 @@
             loadHistory(true);
             chatInput.focus();
             initAppInstallListeners();
-            checkFirstTimeVisitor();
         });
     </script>
 
-    <!-- 1. First-Time Visitor App Choice Modal -->
-    <div class="app-entry-modal-overlay" id="app-entry-modal-overlay" style="display: none;">
-        <div class="app-entry-modal-card">
-            <button class="entry-modal-close" id="entry-modal-close" title="Dismiss and open in web">
+    <!-- Single Mobile Install Sheet (Shown only if native prompt not supported, e.g. iOS Safari) -->
+    <div class="mobile-install-sheet-overlay" id="mobile-install-sheet-overlay" style="display: none;">
+        <div class="mobile-install-sheet-card">
+            <button class="sheet-close-btn" id="sheet-close-btn" title="Close">
                 <i class="fa-solid fa-xmark"></i>
             </button>
-            <div class="entry-modal-icon-badge">
-                <i class="fa-solid fa-calendar-check"></i>
-                <span class="sparkle-dot"></span>
-            </div>
-            <h2 class="entry-modal-title">AI Calendar Assistant</h2>
-            <p class="entry-modal-desc">Manage schedules, Google Calendar events, and scan Gmail invitations with Gemini
-                AI.</p>
-
-            <div class="entry-modal-options">
-                <!-- Option 1: Get App -->
-                <div class="entry-option-card entry-option-app" id="card-get-app">
-                    <span class="entry-option-badge">Recommended</span>
-                    <div class="entry-option-icon">
-                        <i class="fa-solid fa-cloud-arrow-down"></i>
-                    </div>
-                    <div class="entry-option-title">Get App</div>
-                    <div class="entry-option-subtitle">Download app with index.html or install directly to your mobile
-                        home screen & desktop</div>
-                    <button class="btn-entry-action btn-entry-app" id="btn-modal-get-app">
-                        <i class="fa-solid fa-cloud-arrow-down"></i> Get the app
-                    </button>
-                </div>
-
-                <!-- Option 2: Open in Web -->
-                <div class="entry-option-card" id="card-open-web">
-                    <div class="entry-option-icon">
-                        <i class="fa-solid fa-globe"></i>
-                    </div>
-                    <div class="entry-option-title">Open in Web</div>
-                    <div class="entry-option-subtitle">Continue directly in your browser with full calendar & Gmail
-                        assistant features</div>
-                    <button class="btn-entry-action btn-entry-web" id="btn-modal-open-web">
-                        Open in Web <i class="fa-solid fa-arrow-right"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 2. App Download & Installation Guide Dialog -->
-    <div class="app-download-dialog-overlay" id="app-download-dialog-overlay" style="display: none;">
-        <div class="app-download-dialog-card">
-            <button class="entry-modal-close" id="download-dialog-close" title="Close">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-            <div class="entry-modal-icon-badge">
+            <div class="sheet-icon-badge">
                 <i class="fa-solid fa-mobile-screen-button"></i>
-                <span class="sparkle-dot"></span>
             </div>
-            <h2 class="entry-modal-title">AI Calendar Assistant App</h2>
-            <p class="entry-modal-desc">Your app package (<strong>AI-Calendar-Assistant.html</strong>) is ready with
-                <strong>index.html</strong> interface! Choose how to run or install:</p>
-
-            <div class="download-guide-grid">
-                <!-- Mobile Guide -->
-                <div class="download-guide-box">
-                    <h4><i class="fa-solid fa-mobile-screen"></i> For Mobile Phone</h4>
-                    <p>• <strong>Open downloaded App:</strong> Tap the downloaded
-                        <code>AI-Calendar-Assistant.html</code> to run index.html directly.</p>
-                    <p>• <strong>Android Install:</strong> Tap <strong>Install Mobile App</strong> below or browser menu
-                        (⋮) > <strong>Add to Home screen</strong>.</p>
-                    <p>• <strong>iPhone / Safari:</strong> Tap <strong>Share</strong> (<i
-                            class="fa-solid fa-arrow-up-from-bracket"></i>) > <strong>Add to Home Screen</strong>.</p>
+            <h3 class="sheet-title">Install on Mobile</h3>
+            <p class="sheet-desc">Install AI Calendar Assistant directly to your home screen for fast one-tap access.</p>
+            <div class="sheet-steps" id="sheet-steps">
+                <div class="sheet-step-item">
+                    <div class="sheet-step-num">1</div>
+                    <div class="sheet-step-text" id="sheet-step-1">Tap the <strong>Share</strong> button <i class="fa-solid fa-arrow-up-from-bracket"></i> in the Safari toolbar.</div>
                 </div>
-
-                <!-- Laptop / PC Guide -->
-                <div class="download-guide-box">
-                    <h4><i class="fa-solid fa-laptop"></i> For Laptop / Desktop</h4>
-                    <p>• <strong>Run App:</strong> Double-click the downloaded <code>AI-Calendar-Assistant.html</code>
-                        file on your computer.</p>
-                    <p>• <strong>Install Standalone:</strong> Click <strong>Install in Browser</strong> or the address
-                        bar install icon.</p>
-                    <p>• <strong>Windows Setup:</strong> Download the <code>.bat</code> setup to create a desktop
-                        shortcut.</p>
+                <div class="sheet-step-item">
+                    <div class="sheet-step-num">2</div>
+                    <div class="sheet-step-text" id="sheet-step-2">Select <strong>Add to Home Screen</strong> <i class="fa-solid fa-square-plus"></i>.</div>
                 </div>
             </div>
-
-            <div class="download-guide-actions">
-                <a href="/download/app" class="btn-entry-action btn-entry-app" id="btn-dialog-redownload-html"
-                    style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
-                    <i class="fa-solid fa-download"></i> Download App (index.html)
-                </a>
-                <button class="btn-entry-action btn-entry-app" id="btn-dialog-install-native"
-                    style="display: none; width: auto; padding: 0.75rem 1.4rem;">
-                    <i class="fa-solid fa-arrow-down-to-bracket"></i> Install in Browser / Mobile
-                </button>
-                <a href="/download/app?format=bat" class="btn-entry-action btn-entry-web" id="btn-dialog-redownload-bat"
-                    style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
-                    <i class="fa-solid fa-laptop"></i> Windows Setup (.bat)
-                </a>
-                <button class="btn-entry-action btn-entry-web" id="btn-dialog-done"
-                    style="width: auto; padding: 0.75rem 1.4rem;">
-                    Done
-                </button>
-            </div>
+            <button class="btn-sheet-done" id="btn-sheet-done">Got it</button>
         </div>
     </div>
 </body>
