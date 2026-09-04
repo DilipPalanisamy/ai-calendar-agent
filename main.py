@@ -14,7 +14,8 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -308,6 +309,11 @@ app.add_middleware(
     same_site="lax",
     https_only=IS_PRODUCTION,
 )
+
+# Mount Static Files for PWA manifest, service worker, and app download assets
+static_dir = BASE_DIR / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 # ---------------------------------------------------------------------------
@@ -2431,7 +2437,74 @@ async def serve_index(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# 11. Server Runner
+# 11. Progressive Web App (PWA) & App Download Endpoints
+# ---------------------------------------------------------------------------
+@app.get("/manifest.json")
+async def get_manifest():
+    """Serves the Web App Manifest for mobile and desktop PWA installation."""
+    manifest_path = BASE_DIR / "static" / "manifest.json"
+    if manifest_path.exists():
+        return FileResponse(manifest_path, media_type="application/manifest+json")
+    return JSONResponse(
+        content={
+            "name": "AI Calendar Assistant",
+            "short_name": "AI Calendar",
+            "start_url": "/",
+            "display": "standalone",
+        },
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/sw.js")
+async def get_service_worker():
+    """Serves the Service Worker for PWA compliance and offline support."""
+    sw_path = BASE_DIR / "static" / "sw.js"
+    if sw_path.exists():
+        return FileResponse(sw_path, media_type="application/javascript")
+    return HTMLResponse(content="// Service Worker", media_type="application/javascript")
+
+
+@app.get("/download/app")
+async def download_app(request: Request, format: Optional[str] = None):
+    """
+    Downloads the native app setup launcher for laptop (Windows .bat / Internet shortcut)
+    or mobile launcher.
+    """
+    user_agent = request.headers.get("user-agent", "").lower()
+    
+    # If explicitly requesting shortcut or on macOS / Linux
+    if format == "shortcut" or ("mac" in user_agent and "windows" not in user_agent):
+        url_file = BASE_DIR / "static" / "download" / "AI-Calendar-Assistant.url"
+        if url_file.exists():
+            return FileResponse(
+                url_file,
+                media_type="application/internet-shortcut",
+                filename="AI-Calendar-Assistant.url",
+            )
+
+    # Windows / Laptop batch setup launcher
+    bat_file = BASE_DIR / "static" / "download" / "AI-Calendar-Assistant-Setup.bat"
+    if bat_file.exists():
+        return FileResponse(
+            bat_file,
+            media_type="application/x-bat",
+            filename="AI-Calendar-Assistant-Setup.bat",
+        )
+
+    # Fallback to .url shortcut
+    url_file = BASE_DIR / "static" / "download" / "AI-Calendar-Assistant.url"
+    if url_file.exists():
+        return FileResponse(
+            url_file,
+            media_type="application/internet-shortcut",
+            filename="AI-Calendar-Assistant.url",
+        )
+    return JSONResponse(content={"status": "ready", "url": "https://ai-calendar-agent-we11.onrender.com"})
+
+
+# ---------------------------------------------------------------------------
+# 12. Server Runner
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))

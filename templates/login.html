@@ -7,6 +7,11 @@
     <title>AI Calendar Assistant</title>
     <meta name="description" content="AI Calendar Assistant: Manage, schedule, and delete Google Calendar events and scan Gmail invitations with Gemini AI.">
     
+    <!-- PWA Manifest & App Icons -->
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
+    
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -258,6 +263,304 @@
                 white-space: nowrap;
             }
         }
+
+        /* ----------------------------------------------------
+           First-Time App Choice Modal & Download Dialog
+           ---------------------------------------------------- */
+        .app-entry-modal-overlay,
+        .app-download-dialog-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(4, 7, 13, 0.78);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.25rem;
+            z-index: 9999;
+            opacity: 1;
+            transition: opacity 0.25s ease;
+        }
+
+        .app-entry-modal-overlay.fade-out,
+        .app-download-dialog-overlay.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .app-entry-modal-card,
+        .app-download-dialog-card {
+            background: linear-gradient(160deg, rgba(26, 34, 52, 0.96) 0%, rgba(13, 19, 33, 0.98) 100%);
+            border: 1px solid rgba(139, 92, 246, 0.28);
+            border-radius: 24px;
+            padding: 2.25rem 2rem;
+            max-width: 520px;
+            width: 100%;
+            text-align: center;
+            position: relative;
+            box-shadow: 0 30px 70px -15px rgba(0, 0, 0, 0.8), 0 0 50px -10px rgba(99, 102, 241, 0.25);
+            animation: modalPopIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes modalPopIn {
+            from {
+                opacity: 0;
+                transform: scale(0.94) translateY(12px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .entry-modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+
+        .entry-modal-close:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            transform: scale(1.05);
+        }
+
+        .entry-modal-icon-badge {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 1.1rem;
+            border-radius: 20px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.85rem;
+            color: #ffffff;
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.45);
+            position: relative;
+        }
+
+        .entry-modal-icon-badge .sparkle-dot {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #38bdf8;
+            border: 2px solid #0b0f17;
+            box-shadow: 0 0 10px #38bdf8;
+        }
+
+        .entry-modal-title {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.45rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.01em;
+        }
+
+        .entry-modal-desc {
+            font-size: 0.88rem;
+            color: #9ca3af;
+            line-height: 1.5;
+            margin-bottom: 1.65rem;
+            padding: 0 0.5rem;
+        }
+
+        .entry-modal-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            text-align: left;
+        }
+
+        @media (max-width: 500px) {
+            .entry-modal-options {
+                grid-template-columns: 1fr;
+            }
+            .app-entry-modal-card {
+                padding: 1.75rem 1.25rem;
+            }
+        }
+
+        .entry-option-card {
+            background: rgba(17, 24, 39, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 18px;
+            padding: 1.25rem 1rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            transition: all 0.25s ease;
+            cursor: pointer;
+        }
+
+        .entry-option-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(139, 92, 246, 0.4);
+            background: rgba(25, 34, 53, 0.8);
+            box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.4);
+        }
+
+        .entry-option-app {
+            border-color: rgba(99, 102, 241, 0.35);
+            background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(17, 24, 39, 0.8) 100%);
+        }
+
+        .entry-option-badge {
+            position: absolute;
+            top: -10px;
+            right: 14px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: #ffffff;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            box-shadow: 0 4px 10px rgba(99, 102, 241, 0.35);
+        }
+
+        .entry-option-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.15rem;
+            margin-bottom: 0.85rem;
+            color: #c7d2fe;
+        }
+
+        .entry-option-app .entry-option-icon {
+            background: rgba(99, 102, 241, 0.2);
+            color: #a5b4fc;
+        }
+
+        .entry-option-title {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 0.3rem;
+        }
+
+        .entry-option-subtitle {
+            font-size: 0.78rem;
+            color: #9ca3af;
+            line-height: 1.4;
+            margin-bottom: 1.1rem;
+            flex-grow: 1;
+        }
+
+        .btn-entry-action {
+            width: 100%;
+            padding: 0.65rem 0.85rem;
+            border-radius: 12px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            transition: all 0.2s ease;
+            border: none;
+        }
+
+        .btn-entry-app {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+        }
+
+        .btn-entry-app:hover {
+            box-shadow: 0 6px 22px rgba(99, 102, 241, 0.55);
+            transform: scale(1.02);
+        }
+
+        .btn-entry-web {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .btn-entry-web:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+
+        /* Download Guide Dialog */
+        .download-guide-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin: 1.25rem 0;
+            text-align: left;
+        }
+
+        @media (max-width: 520px) {
+            .download-guide-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .download-guide-box {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 1rem;
+        }
+
+        .download-guide-box h4 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.9rem;
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .download-guide-box h4 i {
+            color: #818cf8;
+        }
+
+        .download-guide-box p {
+            font-size: 0.77rem;
+            color: #94a3b8;
+            line-height: 1.45;
+            margin-bottom: 0.4rem;
+        }
+
+        .download-guide-actions {
+            display: flex;
+            gap: 0.65rem;
+            justify-content: center;
+            margin-top: 1.25rem;
+            flex-wrap: wrap;
+        }
     </style>
 </head>
 <body>
@@ -305,6 +608,14 @@
             <span>Sign in with Google</span>
         </a>
 
+        <!-- Direct Get App option on Login Card -->
+        <div style="margin-top: 1.15rem; display: flex; align-items: center; justify-content: center;">
+            <button class="btn-get-app-header" id="btn-login-get-app" type="button" title="Download AI Calendar Assistant App">
+                <i class="fa-solid fa-cloud-arrow-down"></i>
+                <span>Get App for Laptop & Mobile</span>
+            </button>
+        </div>
+
         <div class="login-footer">
             By signing in, you grant AI Calendar Assistant permission to manage events on your Google Calendar and view invitation emails.
         </div>
@@ -316,5 +627,264 @@
         <span class="legal-separator">•</span>
         <a href="/terms" target="_blank">Terms of Service</a>
     </div>
+
+    <!-- 1. First-Time Visitor App Choice Modal -->
+    <div class="app-entry-modal-overlay" id="app-entry-modal-overlay" style="display: none;">
+        <div class="app-entry-modal-card">
+            <button class="entry-modal-close" id="entry-modal-close" title="Dismiss and open in web">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="entry-modal-icon-badge">
+                <i class="fa-solid fa-calendar-check"></i>
+                <span class="sparkle-dot"></span>
+            </div>
+            <h2 class="entry-modal-title">AI Calendar Assistant</h2>
+            <p class="entry-modal-desc">Manage schedules, Google Calendar events, and scan Gmail invitations with Gemini AI.</p>
+            
+            <div class="entry-modal-options">
+                <!-- Option 1: Get App -->
+                <div class="entry-option-card entry-option-app" id="card-get-app">
+                    <span class="entry-option-badge">Recommended</span>
+                    <div class="entry-option-icon">
+                        <i class="fa-solid fa-cloud-arrow-down"></i>
+                    </div>
+                    <div class="entry-option-title">Get App</div>
+                    <div class="entry-option-subtitle">Download & install on your laptop or mobile for instant desktop and home-screen access</div>
+                    <button class="btn-entry-action btn-entry-app" id="btn-modal-get-app">
+                        <i class="fa-solid fa-download"></i> Get App
+                    </button>
+                </div>
+
+                <!-- Option 2: Open in Web -->
+                <div class="entry-option-card" id="card-open-web">
+                    <div class="entry-option-icon">
+                        <i class="fa-solid fa-globe"></i>
+                    </div>
+                    <div class="entry-option-title">Open in Web</div>
+                    <div class="entry-option-subtitle">Continue directly in your browser with full calendar & Gmail assistant features</div>
+                    <button class="btn-entry-action btn-entry-web" id="btn-modal-open-web">
+                        Open in Web <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. App Download & Installation Guide Dialog -->
+    <div class="app-download-dialog-overlay" id="app-download-dialog-overlay" style="display: none;">
+        <div class="app-download-dialog-card">
+            <button class="entry-modal-close" id="download-dialog-close" title="Close">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="entry-modal-icon-badge">
+                <i class="fa-solid fa-cloud-arrow-down"></i>
+                <span class="sparkle-dot"></span>
+            </div>
+            <h2 class="entry-modal-title">Downloading AI Calendar Assistant</h2>
+            <p class="entry-modal-desc">Your app launcher has started downloading. Follow the steps below for your device:</p>
+
+            <div class="download-guide-grid">
+                <!-- Laptop / PC Guide -->
+                <div class="download-guide-box">
+                    <h4><i class="fa-solid fa-laptop"></i> For Laptop / PC</h4>
+                    <p>• <strong>Windows Setup:</strong> Run the downloaded <code>AI-Calendar-Assistant-Setup.bat</code> to place a shortcut on your Desktop & Start Menu.</p>
+                    <p>• <strong>Browser App Mode:</strong> Look for the <strong>Install</strong> icon (computer with down arrow) in your browser address bar to install in 1 click.</p>
+                </div>
+
+                <!-- Mobile Guide -->
+                <div class="download-guide-box">
+                    <h4><i class="fa-solid fa-mobile-screen"></i> For Mobile</h4>
+                    <p>• <strong>Android:</strong> Tap <strong>Install</strong> when prompted, or open browser menu (⋮) and tap <strong>Add to Home screen</strong>.</p>
+                    <p>• <strong>iPhone / Safari:</strong> Tap the <strong>Share</strong> button (<i class="fa-solid fa-arrow-up-from-bracket"></i>) and choose <strong>Add to Home Screen</strong>.</p>
+                </div>
+            </div>
+
+            <div class="download-guide-actions">
+                <button class="btn-entry-action btn-entry-app" id="btn-dialog-install-native" style="display: none; width: auto; padding: 0.75rem 1.4rem;">
+                    <i class="fa-solid fa-arrow-down-to-bracket"></i> Install in Browser
+                </button>
+                <a href="/download/app" class="btn-entry-action btn-entry-web" id="btn-dialog-redownload" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
+                    <i class="fa-solid fa-download"></i> Download Laptop Setup (.bat)
+                </a>
+                <button class="btn-entry-action btn-entry-web" id="btn-dialog-done" style="width: auto; padding: 0.75rem 1.4rem;">
+                    Done
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ----------------------------------------------------
+        // PWA, App Download & First-Time Visitor Prompt Logic
+        // ----------------------------------------------------
+        let deferredPrompt = null;
+
+        // Register Service Worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').then((reg) => {
+                    console.log('ServiceWorker registered with scope:', reg.scope);
+                }).catch((err) => {
+                    console.warn('ServiceWorker registration error:', err);
+                });
+            });
+        }
+
+        // Capture PWA beforeinstallprompt event
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            const nativeInstallBtn = document.getElementById('btn-dialog-install-native');
+            if (nativeInstallBtn) {
+                nativeInstallBtn.style.display = 'inline-flex';
+            }
+        });
+
+        // First-time visitor modal check
+        function checkFirstTimeVisitor() {
+            const hasSeen = localStorage.getItem('ai_calendar_app_prompt_seen');
+            if (!hasSeen) {
+                const entryModal = document.getElementById('app-entry-modal-overlay');
+                if (entryModal) {
+                    entryModal.style.display = 'flex';
+                }
+            }
+        }
+
+        function closeEntryModal() {
+            localStorage.setItem('ai_calendar_app_prompt_seen', 'true');
+            const modal = document.getElementById('app-entry-modal-overlay');
+            if (modal) {
+                modal.classList.add('fade-out');
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                    modal.classList.remove('fade-out');
+                }, 220);
+            }
+        }
+
+        function triggerDirectDownload() {
+            const isMac = /Macintosh|MacIntel|MacPPC|Mac68K/i.test(navigator.userAgent);
+            const downloadUrl = isMac ? '/download/app?format=shortcut' : '/download/app';
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.setAttribute('download', '');
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+                if (document.body.contains(link)) document.body.removeChild(link);
+            }, 500);
+        }
+
+        function showDownloadGuideDialog() {
+            const guideModal = document.getElementById('app-download-dialog-overlay');
+            if (guideModal) {
+                const nativeBtn = document.getElementById('btn-dialog-install-native');
+                if (nativeBtn) {
+                    nativeBtn.style.display = deferredPrompt ? 'inline-flex' : 'none';
+                }
+                guideModal.style.display = 'flex';
+            }
+        }
+
+        function closeDownloadGuideDialog() {
+            const guideModal = document.getElementById('app-download-dialog-overlay');
+            if (guideModal) {
+                guideModal.classList.add('fade-out');
+                setTimeout(() => {
+                    guideModal.style.display = 'none';
+                    guideModal.classList.remove('fade-out');
+                }, 220);
+            }
+        }
+
+        function triggerAppInstallation(fromFirstTime = false) {
+            if (fromFirstTime) {
+                closeEntryModal();
+            }
+
+            // If browser supports native install prompt
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    console.log('Install outcome:', choiceResult.outcome);
+                    deferredPrompt = null;
+                });
+            }
+
+            // Trigger file download to laptop or mobile
+            triggerDirectDownload();
+
+            // Show guide modal
+            showDownloadGuideDialog();
+        }
+
+        // Attach Event Listeners for App Install & First-Time Prompt
+        function initAppInstallListeners() {
+            const btnLoginGetApp = document.getElementById('btn-login-get-app');
+            if (btnLoginGetApp) {
+                btnLoginGetApp.addEventListener('click', () => triggerAppInstallation(false));
+            }
+
+            // First-time modal buttons
+            const btnModalGetApp = document.getElementById('btn-modal-get-app');
+            const cardGetApp = document.getElementById('card-get-app');
+            if (btnModalGetApp) {
+                btnModalGetApp.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    triggerAppInstallation(true);
+                });
+            }
+            if (cardGetApp) {
+                cardGetApp.addEventListener('click', () => triggerAppInstallation(true));
+            }
+
+            const btnModalOpenWeb = document.getElementById('btn-modal-open-web');
+            const cardOpenWeb = document.getElementById('card-open-web');
+            if (btnModalOpenWeb) {
+                btnModalOpenWeb.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    closeEntryModal();
+                });
+            }
+            if (cardOpenWeb) {
+                cardOpenWeb.addEventListener('click', closeEntryModal);
+            }
+
+            const btnEntryClose = document.getElementById('entry-modal-close');
+            if (btnEntryClose) {
+                btnEntryClose.addEventListener('click', closeEntryModal);
+            }
+
+            // Download guide dialog buttons
+            const btnDialogClose = document.getElementById('download-dialog-close');
+            if (btnDialogClose) {
+                btnDialogClose.addEventListener('click', closeDownloadGuideDialog);
+            }
+
+            const btnDialogDone = document.getElementById('btn-dialog-done');
+            if (btnDialogDone) {
+                btnDialogDone.addEventListener('click', closeDownloadGuideDialog);
+            }
+
+            const btnDialogNative = document.getElementById('btn-dialog-install-native');
+            if (btnDialogNative) {
+                btnDialogNative.addEventListener('click', () => {
+                    if (deferredPrompt) {
+                        deferredPrompt.prompt();
+                        deferredPrompt.userChoice.then(() => {
+                            deferredPrompt = null;
+                            btnDialogNative.style.display = 'none';
+                        });
+                    }
+                });
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initAppInstallListeners();
+            checkFirstTimeVisitor();
+        });
+    </script>
 </body>
 </html>

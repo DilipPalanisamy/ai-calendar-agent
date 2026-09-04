@@ -102,6 +102,22 @@ def test_endpoints():
     assert res_logout.headers.get("location") == "/login", f"Expected location /login, got {res_logout.headers.get('location')}"
     print("[PASS] GET /logout (303 Redirect to /login)", flush=True)
 
+    print("Testing GET /manifest.json (PWA Manifest)...", flush=True)
+    res_manifest = client.get("/manifest.json")
+    assert res_manifest.status_code == 200, f"Expected 200, got {res_manifest.status_code}"
+    assert "AI Calendar Assistant" in res_manifest.text
+    print("[PASS] GET /manifest.json (200 OK)", flush=True)
+
+    print("Testing GET /sw.js (Service Worker)...", flush=True)
+    res_sw = client.get("/sw.js")
+    assert res_sw.status_code == 200, f"Expected 200, got {res_sw.status_code}"
+    print("[PASS] GET /sw.js (200 OK)", flush=True)
+
+    print("Testing GET /download/app (App Download)...", flush=True)
+    res_dl = client.get("/download/app")
+    assert res_dl.status_code == 200, f"Expected 200, got {res_dl.status_code}"
+    print("[PASS] GET /download/app (200 OK)", flush=True)
+
     # SQLite Database Multi-User Isolation Tests
     print("Testing SQLite Chat History Multi-User Isolation...", flush=True)
     user_a = "user_a@gmail.com"
