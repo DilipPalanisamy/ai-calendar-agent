@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0b0f17">
+    <title>AI Calendar Assistant - Mobile & Desktop App</title>
+    
+    <!-- Google Fonts & FontAwesome -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+        :root {
+            --bg-primary: #0b0f17;
+            --bg-secondary: #111827;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+            --accent-glow: rgba(99, 102, 241, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            height: 100dvh;
+            background-color: var(--bg-primary);
+            color: #f9fafb;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            overflow: hidden;
+        }
+
+        /* App Frame */
+        #app-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+            background: var(--bg-primary);
+        }
+
+        /* Splash Screen */
+        .splash-screen {
+            position: fixed;
+            inset: 0;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            transition: opacity 0.4s ease, visibility 0.4s ease;
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        .splash-screen.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .splash-icon {
+            width: 76px;
+            height: 76px;
+            border-radius: 22px;
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.2rem;
+            color: white;
+            box-shadow: 0 12px 35px var(--accent-glow);
+            margin-bottom: 1.5rem;
+            animation: pulseIcon 2s infinite ease-in-out;
+        }
+
+        @keyframes pulseIcon {
+            0%, 100% { transform: scale(1); box-shadow: 0 12px 35px var(--accent-glow); }
+            50% { transform: scale(1.05); box-shadow: 0 16px 45px rgba(139, 92, 246, 0.6); }
+        }
+
+        .splash-title {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.4rem;
+        }
+
+        .splash-subtitle {
+            font-size: 0.88rem;
+            color: #9ca3af;
+            margin-bottom: 1.75rem;
+        }
+
+        .splash-loader {
+            width: 36px;
+            height: 36px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #6366f1;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Mobile Bottom Install Bar */
+        .mobile-pwa-bar {
+            position: fixed;
+            bottom: 1rem;
+            left: 1rem;
+            right: 1rem;
+            background: rgba(17, 24, 39, 0.95);
+            border: 1px solid rgba(139, 92, 246, 0.35);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            z-index: 100;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }
+
+        .mobile-pwa-info {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+        .mobile-pwa-info i {
+            font-size: 1.3rem;
+            color: #818cf8;
+        }
+
+        .mobile-pwa-text h5 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .mobile-pwa-text p {
+            font-size: 0.72rem;
+            color: #9ca3af;
+        }
+
+        .btn-pwa-add {
+            background: var(--accent-gradient);
+            color: white;
+            border: none;
+            padding: 0.45rem 0.9rem;
+            border-radius: 10px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <!-- Splash Screen while connecting -->
+    <div class="splash-screen" id="splash-screen">
+        <div class="splash-icon">
+            <i class="fa-solid fa-calendar-check"></i>
+        </div>
+        <h1 class="splash-title">AI Calendar Assistant</h1>
+        <p class="splash-subtitle">Launching Mobile & Desktop Web App...</p>
+        <div class="splash-loader"></div>
+    </div>
+
+    <!-- Live Application Frame loading index.html -->
+    <iframe id="app-frame" src="https://ai-calendar-agent-we11.onrender.com/" allow="microphone; clipboard-write; geolocation"></iframe>
+
+    <script>
+        const splash = document.getElementById('splash-screen');
+        const frame = document.getElementById('app-frame');
+
+        // Check if running on localhost / same host
+        if (window.location.protocol.startsWith('http')) {
+            frame.src = window.location.origin + '/';
+        }
+
+        // Hide splash when iframe loads
+        frame.addEventListener('load', () => {
+            setTimeout(() => {
+                splash.classList.add('hidden');
+            }, 400);
+        });
+
+        // Timeout fallback to reveal app
+        setTimeout(() => {
+            splash.classList.add('hidden');
+        }, 2500);
+    </script>
+</body>
+</html>

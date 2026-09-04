@@ -2466,15 +2466,26 @@ async def get_service_worker():
 
 
 @app.get("/download/app")
+@app.get("/download/index.html")
 async def download_app(request: Request, format: Optional[str] = None):
     """
-    Downloads the native app setup launcher for laptop (Windows .bat / Internet shortcut)
-    or mobile launcher.
+    Downloads the AI Calendar Assistant app file (AI-Calendar-Assistant.html / index.html)
+    or setup package for mobile and desktop.
     """
     user_agent = request.headers.get("user-agent", "").lower()
     
-    # If explicitly requesting shortcut or on macOS / Linux
-    if format == "shortcut" or ("mac" in user_agent and "windows" not in user_agent):
+    # If explicitly requesting Windows .bat installer
+    if format == "bat":
+        bat_file = BASE_DIR / "static" / "download" / "AI-Calendar-Assistant-Setup.bat"
+        if bat_file.exists():
+            return FileResponse(
+                bat_file,
+                media_type="application/x-bat",
+                filename="AI-Calendar-Assistant-Setup.bat",
+            )
+
+    # If explicitly requesting internet shortcut
+    if format == "shortcut":
         url_file = BASE_DIR / "static" / "download" / "AI-Calendar-Assistant.url"
         if url_file.exists():
             return FileResponse(
@@ -2483,23 +2494,25 @@ async def download_app(request: Request, format: Optional[str] = None):
                 filename="AI-Calendar-Assistant.url",
             )
 
-    # Windows / Laptop batch setup launcher
-    bat_file = BASE_DIR / "static" / "download" / "AI-Calendar-Assistant-Setup.bat"
-    if bat_file.exists():
+    # Primary App download: Standalone App with index.html interface
+    html_file = BASE_DIR / "static" / "download" / "AI-Calendar-Assistant.html"
+    if html_file.exists():
+        fname = "index.html" if "index.html" in request.url.path or format == "index" else "AI-Calendar-Assistant.html"
         return FileResponse(
-            bat_file,
-            media_type="application/x-bat",
-            filename="AI-Calendar-Assistant-Setup.bat",
+            html_file,
+            media_type="text/html",
+            filename=fname,
         )
 
-    # Fallback to .url shortcut
-    url_file = BASE_DIR / "static" / "download" / "AI-Calendar-Assistant.url"
-    if url_file.exists():
+    # Fallback to templates/index.html
+    template_index = BASE_DIR / "templates" / "index.html"
+    if template_index.exists():
         return FileResponse(
-            url_file,
-            media_type="application/internet-shortcut",
-            filename="AI-Calendar-Assistant.url",
+            template_index,
+            media_type="text/html",
+            filename="index.html",
         )
+
     return JSONResponse(content={"status": "ready", "url": "https://ai-calendar-agent-we11.onrender.com"})
 
 

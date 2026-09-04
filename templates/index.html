@@ -1681,6 +1681,235 @@
             margin-top: 1.25rem;
             flex-wrap: wrap;
         }
+
+        /* ----------------------------------------------------
+           Mobile App Bottom Navigation Bar
+           ---------------------------------------------------- */
+        .mobile-bottom-nav {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 64px;
+            background: rgba(11, 15, 23, 0.96);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            z-index: 40;
+            padding: 0 0.5rem;
+            padding-bottom: env(safe-area-inset-bottom);
+            align-items: center;
+            justify-content: space-around;
+        }
+
+        .mobile-nav-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.68rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 6px 0;
+            border-radius: 10px;
+            transition: all 0.2s ease;
+        }
+
+        .mobile-nav-btn i {
+            font-size: 1.15rem;
+            transition: transform 0.2s ease, color 0.2s ease;
+        }
+
+        .mobile-nav-btn.active,
+        .mobile-nav-btn:hover {
+            color: #818cf8;
+        }
+
+        .mobile-nav-btn.active i {
+            color: #818cf8;
+            transform: scale(1.1);
+        }
+
+        /* Mobile Install Banner */
+        .mobile-install-banner {
+            display: none;
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.98) 100%);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.35);
+            padding: 0.6rem 1rem;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            z-index: 35;
+        }
+
+        .mobile-banner-left {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            overflow: hidden;
+        }
+
+        .mobile-banner-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.95rem;
+            flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+        }
+
+        .mobile-banner-text {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .mobile-banner-title {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #ffffff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .mobile-banner-sub {
+            font-size: 0.7rem;
+            color: #94a3b8;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .mobile-banner-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            flex-shrink: 0;
+        }
+
+        .btn-banner-install {
+            background: var(--accent-gradient);
+            color: #ffffff;
+            border: none;
+            padding: 0.38rem 0.85rem;
+            border-radius: 9999px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.76rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35);
+        }
+
+        .btn-banner-close {
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            color: var(--text-muted);
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.75rem;
+        }
+
+        /* Mobile View Toggle Button in Header */
+        .btn-mobile-view-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-secondary);
+            padding: 6px 12px;
+            min-height: 38px;
+            border-radius: 20px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-mobile-view-toggle:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.22);
+        }
+
+        .btn-mobile-view-toggle.active {
+            background: rgba(99, 102, 241, 0.25);
+            border-color: #6366f1;
+            color: #c7d2fe;
+        }
+
+        /* Responsive Mobile Type Rules */
+        @media (max-width: 768px) {
+            .mobile-bottom-nav {
+                display: flex;
+            }
+            .mobile-install-banner {
+                display: flex;
+            }
+            .chat-viewport {
+                padding-bottom: 78px !important;
+            }
+            .chat-input-area {
+                bottom: 64px;
+                padding: 0.5rem 0.75rem;
+            }
+            .main-corner-legal {
+                display: none;
+            }
+            .btn-mobile-view-toggle {
+                display: none;
+            }
+        }
+
+        /* Simulated Mobile App Mode on Desktop */
+        body.mobile-app-mode .app-container {
+            max-width: 440px;
+            margin: 0 auto;
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+        }
+        body.mobile-app-mode .mobile-bottom-nav {
+            display: flex;
+            max-width: 440px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        body.mobile-app-mode .mobile-install-banner {
+            display: flex;
+        }
+        body.mobile-app-mode .chat-viewport {
+            padding-bottom: 78px !important;
+        }
+        body.mobile-app-mode .chat-input-area {
+            bottom: 64px;
+        }
+        body.mobile-app-mode .btn-sidebar-toggle {
+            display: flex;
+        }
     </style>
 </head>
 
@@ -1754,6 +1983,27 @@
 
         <!-- Main Chat Area -->
         <main class="main-content">
+            <!-- Mobile Quick Install Banner -->
+            <div class="mobile-install-banner" id="mobile-install-banner">
+                <div class="mobile-banner-left">
+                    <div class="mobile-banner-icon">
+                        <i class="fa-solid fa-calendar-check"></i>
+                    </div>
+                    <div class="mobile-banner-text">
+                        <div class="mobile-banner-title">AI Calendar Assistant App</div>
+                        <div class="mobile-banner-sub">Install on Mobile or Laptop with index.html</div>
+                    </div>
+                </div>
+                <div class="mobile-banner-actions">
+                    <button class="btn-banner-install" id="btn-banner-install">
+                        <i class="fa-solid fa-download"></i> Install
+                    </button>
+                    <button class="btn-banner-close" id="btn-banner-close" title="Dismiss">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
             <!-- Header with Hamburger & Multi-Account Switcher -->
             <header class="chat-header">
                 <div class="chat-header-left">
@@ -1763,8 +2013,13 @@
                     <h2 class="chat-header-title" id="current-chat-title">AI Assistant</h2>
                 </div>
 
-                <!-- Right Header Actions (Get App Button & Multi-Account Switcher) -->
+                <!-- Right Header Actions (Mobile View Toggle, Get App Button & Multi-Account Switcher) -->
                 <div class="chat-header-actions">
+                    <button class="btn-mobile-view-toggle" id="btn-mobile-view-toggle" title="Toggle Mobile App Layout Mode">
+                        <i class="fa-solid fa-mobile-screen"></i>
+                        <span class="mobile-toggle-text">Mobile View</span>
+                    </button>
+
                     <button class="btn-get-app-header" id="btn-get-app-header" title="Download & Install AI Calendar Assistant on Mobile or Laptop">
                         <i class="fa-solid fa-cloud-arrow-down"></i>
                         <span class="get-app-btn-text">Get App</span>
@@ -1853,6 +2108,30 @@
                     </button>
                 </div>
             </div>
+
+            <!-- Mobile App Bottom Navigation Bar -->
+            <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+                <button class="mobile-nav-btn active" id="m-nav-chat" title="Chat Assistant">
+                    <i class="fa-solid fa-comments"></i>
+                    <span>Chat</span>
+                </button>
+                <button class="mobile-nav-btn" id="m-nav-new" title="Start New Chat">
+                    <i class="fa-solid fa-plus-circle"></i>
+                    <span>New</span>
+                </button>
+                <button class="mobile-nav-btn" id="m-nav-events" title="Upcoming Calendar Events">
+                    <i class="fa-solid fa-calendar-check"></i>
+                    <span>Events</span>
+                </button>
+                <button class="mobile-nav-btn" id="m-nav-gmail" title="Scan Gmail Invites">
+                    <i class="fa-solid fa-envelope-open-text"></i>
+                    <span>Gmail</span>
+                </button>
+                <button class="mobile-nav-btn" id="m-nav-app" title="Download & Install App">
+                    <i class="fa-solid fa-mobile-screen"></i>
+                    <span>Get App</span>
+                </button>
+            </nav>
 
             <!-- Corner Legal Links -->
             <div class="main-corner-legal" id="main-corner-legal">
@@ -2688,11 +2967,9 @@
         }
 
         function triggerDirectDownload() {
-            const isMac = /Macintosh|MacIntel|MacPPC|Mac68K/i.test(navigator.userAgent);
-            const downloadUrl = isMac ? '/download/app?format=shortcut' : '/download/app';
             const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.setAttribute('download', '');
+            link.href = '/download/app';
+            link.setAttribute('download', 'AI-Calendar-Assistant.html');
             document.body.appendChild(link);
             link.click();
             setTimeout(() => {
@@ -2727,7 +3004,7 @@
                 closeEntryModal();
             }
 
-            // If browser supports native install prompt
+            // 1. If browser supports native install prompt
             if (deferredPrompt) {
                 deferredPrompt.prompt();
                 deferredPrompt.userChoice.then((choiceResult) => {
@@ -2736,10 +3013,10 @@
                 });
             }
 
-            // Trigger file download to laptop or mobile
+            // 2. Trigger direct download of the App HTML package
             triggerDirectDownload();
 
-            // Show guide modal
+            // 3. Show guide modal with options for mobile and laptop
             showDownloadGuideDialog();
         }
 
@@ -2749,6 +3026,85 @@
             const btnHeader = document.getElementById('btn-get-app-header');
             if (btnHeader) {
                 btnHeader.addEventListener('click', () => triggerAppInstallation(false));
+            }
+
+            // Mobile Bottom Navigation Bar Listeners
+            const mNavChat = document.getElementById('m-nav-chat');
+            const mNavNew = document.getElementById('m-nav-new');
+            const mNavEvents = document.getElementById('m-nav-events');
+            const mNavGmail = document.getElementById('m-nav-gmail');
+            const mNavApp = document.getElementById('m-nav-app');
+
+            if (mNavChat) {
+                mNavChat.addEventListener('click', () => {
+                    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+                    mNavChat.classList.add('active');
+                    chatInput.focus();
+                });
+            }
+
+            if (mNavNew) {
+                mNavNew.addEventListener('click', () => {
+                    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+                    mNavNew.classList.add('active');
+                    // Click new chat
+                    const newChat = document.getElementById('new-chat-btn');
+                    if (newChat) newChat.click();
+                    setTimeout(() => {
+                        document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+                        if (mNavChat) mNavChat.classList.add('active');
+                    }, 400);
+                });
+            }
+
+            if (mNavEvents) {
+                mNavEvents.addEventListener('click', () => {
+                    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+                    mNavEvents.classList.add('active');
+                    chatInput.value = "What are my upcoming events on Google Calendar?";
+                    sendMessage();
+                });
+            }
+
+            if (mNavGmail) {
+                mNavGmail.addEventListener('click', () => {
+                    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+                    mNavGmail.classList.add('active');
+                    chatInput.value = "Scan my Gmail inbox for upcoming meeting and coffee invitations";
+                    sendMessage();
+                });
+            }
+
+            if (mNavApp) {
+                mNavApp.addEventListener('click', () => {
+                    triggerAppInstallation(false);
+                });
+            }
+
+            // Mobile Quick Banner Listeners
+            const btnBannerInstall = document.getElementById('btn-banner-install');
+            const btnBannerClose = document.getElementById('btn-banner-close');
+            const mobileBanner = document.getElementById('mobile-install-banner');
+
+            if (btnBannerInstall) {
+                btnBannerInstall.addEventListener('click', () => triggerAppInstallation(false));
+            }
+            if (btnBannerClose && mobileBanner) {
+                btnBannerClose.addEventListener('click', () => {
+                    mobileBanner.style.display = 'none';
+                });
+            }
+
+            // Mobile Mode Simulator Toggle (Desktop)
+            const btnMobileToggle = document.getElementById('btn-mobile-view-toggle');
+            if (btnMobileToggle) {
+                btnMobileToggle.addEventListener('click', () => {
+                    document.body.classList.toggle('mobile-app-mode');
+                    btnMobileToggle.classList.toggle('active');
+                    const isMobile = document.body.classList.contains('mobile-app-mode');
+                    const label = btnMobileToggle.querySelector('.mobile-toggle-text');
+                    if (label) label.textContent = isMobile ? 'Desktop View' : 'Mobile View';
+                });
             }
 
             // First-time modal buttons
@@ -2837,9 +3193,9 @@
                         <i class="fa-solid fa-cloud-arrow-down"></i>
                     </div>
                     <div class="entry-option-title">Get App</div>
-                    <div class="entry-option-subtitle">Download & install on your laptop or mobile for instant desktop and home-screen access</div>
+                    <div class="entry-option-subtitle">Download app with index.html or install directly to your mobile home screen & desktop</div>
                     <button class="btn-entry-action btn-entry-app" id="btn-modal-get-app">
-                        <i class="fa-solid fa-download"></i> Get App
+                        <i class="fa-solid fa-cloud-arrow-down"></i> Get App (index.html)
                     </button>
                 </div>
 
@@ -2865,34 +3221,39 @@
                 <i class="fa-solid fa-xmark"></i>
             </button>
             <div class="entry-modal-icon-badge">
-                <i class="fa-solid fa-cloud-arrow-down"></i>
+                <i class="fa-solid fa-mobile-screen-button"></i>
                 <span class="sparkle-dot"></span>
             </div>
-            <h2 class="entry-modal-title">Downloading AI Calendar Assistant</h2>
-            <p class="entry-modal-desc">Your app launcher has started downloading. Follow the steps below for your device:</p>
+            <h2 class="entry-modal-title">AI Calendar Assistant App</h2>
+            <p class="entry-modal-desc">Your app package (<strong>AI-Calendar-Assistant.html</strong>) is ready with <strong>index.html</strong> interface! Choose how to run or install:</p>
 
             <div class="download-guide-grid">
-                <!-- Laptop / PC Guide -->
-                <div class="download-guide-box">
-                    <h4><i class="fa-solid fa-laptop"></i> For Laptop / PC</h4>
-                    <p>• <strong>Windows Setup:</strong> Run the downloaded <code>AI-Calendar-Assistant-Setup.bat</code> to place a shortcut on your Desktop & Start Menu.</p>
-                    <p>• <strong>Browser App Mode:</strong> Look for the <strong>Install</strong> icon (computer with down arrow) in your browser address bar to install in 1 click.</p>
-                </div>
-
                 <!-- Mobile Guide -->
                 <div class="download-guide-box">
-                    <h4><i class="fa-solid fa-mobile-screen"></i> For Mobile</h4>
-                    <p>• <strong>Android:</strong> Tap <strong>Install</strong> when prompted, or open browser menu (⋮) and tap <strong>Add to Home screen</strong>.</p>
-                    <p>• <strong>iPhone / Safari:</strong> Tap the <strong>Share</strong> button (<i class="fa-solid fa-arrow-up-from-bracket"></i>) and choose <strong>Add to Home Screen</strong>.</p>
+                    <h4><i class="fa-solid fa-mobile-screen"></i> For Mobile Phone</h4>
+                    <p>• <strong>Open downloaded App:</strong> Tap the downloaded <code>AI-Calendar-Assistant.html</code> to run index.html directly.</p>
+                    <p>• <strong>Android Install:</strong> Tap <strong>Install Mobile App</strong> below or browser menu (⋮) > <strong>Add to Home screen</strong>.</p>
+                    <p>• <strong>iPhone / Safari:</strong> Tap <strong>Share</strong> (<i class="fa-solid fa-arrow-up-from-bracket"></i>) > <strong>Add to Home Screen</strong>.</p>
+                </div>
+
+                <!-- Laptop / PC Guide -->
+                <div class="download-guide-box">
+                    <h4><i class="fa-solid fa-laptop"></i> For Laptop / Desktop</h4>
+                    <p>• <strong>Run App:</strong> Double-click the downloaded <code>AI-Calendar-Assistant.html</code> file on your computer.</p>
+                    <p>• <strong>Install Standalone:</strong> Click <strong>Install in Browser</strong> or the address bar install icon.</p>
+                    <p>• <strong>Windows Setup:</strong> Download the <code>.bat</code> setup to create a desktop shortcut.</p>
                 </div>
             </div>
 
             <div class="download-guide-actions">
+                <a href="/download/app" class="btn-entry-action btn-entry-app" id="btn-dialog-redownload-html" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
+                    <i class="fa-solid fa-download"></i> Download App (index.html)
+                </a>
                 <button class="btn-entry-action btn-entry-app" id="btn-dialog-install-native" style="display: none; width: auto; padding: 0.75rem 1.4rem;">
-                    <i class="fa-solid fa-arrow-down-to-bracket"></i> Install in Browser
+                    <i class="fa-solid fa-arrow-down-to-bracket"></i> Install in Browser / Mobile
                 </button>
-                <a href="/download/app" class="btn-entry-action btn-entry-web" id="btn-dialog-redownload" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
-                    <i class="fa-solid fa-download"></i> Download Laptop Setup (.bat)
+                <a href="/download/app?format=bat" class="btn-entry-action btn-entry-web" id="btn-dialog-redownload-bat" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
+                    <i class="fa-solid fa-laptop"></i> Windows Setup (.bat)
                 </a>
                 <button class="btn-entry-action btn-entry-web" id="btn-dialog-done" style="width: auto; padding: 0.75rem 1.4rem;">
                     Done

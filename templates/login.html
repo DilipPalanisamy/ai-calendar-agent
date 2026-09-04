@@ -649,9 +649,9 @@
                         <i class="fa-solid fa-cloud-arrow-down"></i>
                     </div>
                     <div class="entry-option-title">Get App</div>
-                    <div class="entry-option-subtitle">Download & install on your laptop or mobile for instant desktop and home-screen access</div>
+                    <div class="entry-option-subtitle">Download app with index.html or install directly to your mobile home screen & desktop</div>
                     <button class="btn-entry-action btn-entry-app" id="btn-modal-get-app">
-                        <i class="fa-solid fa-download"></i> Get App
+                        <i class="fa-solid fa-cloud-arrow-down"></i> Get App (index.html)
                     </button>
                 </div>
 
@@ -677,34 +677,39 @@
                 <i class="fa-solid fa-xmark"></i>
             </button>
             <div class="entry-modal-icon-badge">
-                <i class="fa-solid fa-cloud-arrow-down"></i>
+                <i class="fa-solid fa-mobile-screen-button"></i>
                 <span class="sparkle-dot"></span>
             </div>
-            <h2 class="entry-modal-title">Downloading AI Calendar Assistant</h2>
-            <p class="entry-modal-desc">Your app launcher has started downloading. Follow the steps below for your device:</p>
+            <h2 class="entry-modal-title">AI Calendar Assistant App</h2>
+            <p class="entry-modal-desc">Your app package (<strong>AI-Calendar-Assistant.html</strong>) is ready with <strong>index.html</strong> interface! Choose how to run or install:</p>
 
             <div class="download-guide-grid">
-                <!-- Laptop / PC Guide -->
-                <div class="download-guide-box">
-                    <h4><i class="fa-solid fa-laptop"></i> For Laptop / PC</h4>
-                    <p>• <strong>Windows Setup:</strong> Run the downloaded <code>AI-Calendar-Assistant-Setup.bat</code> to place a shortcut on your Desktop & Start Menu.</p>
-                    <p>• <strong>Browser App Mode:</strong> Look for the <strong>Install</strong> icon (computer with down arrow) in your browser address bar to install in 1 click.</p>
-                </div>
-
                 <!-- Mobile Guide -->
                 <div class="download-guide-box">
-                    <h4><i class="fa-solid fa-mobile-screen"></i> For Mobile</h4>
-                    <p>• <strong>Android:</strong> Tap <strong>Install</strong> when prompted, or open browser menu (⋮) and tap <strong>Add to Home screen</strong>.</p>
-                    <p>• <strong>iPhone / Safari:</strong> Tap the <strong>Share</strong> button (<i class="fa-solid fa-arrow-up-from-bracket"></i>) and choose <strong>Add to Home Screen</strong>.</p>
+                    <h4><i class="fa-solid fa-mobile-screen"></i> For Mobile Phone</h4>
+                    <p>• <strong>Open downloaded App:</strong> Tap the downloaded <code>AI-Calendar-Assistant.html</code> to run index.html directly.</p>
+                    <p>• <strong>Android Install:</strong> Tap <strong>Install Mobile App</strong> below or browser menu (⋮) > <strong>Add to Home screen</strong>.</p>
+                    <p>• <strong>iPhone / Safari:</strong> Tap <strong>Share</strong> (<i class="fa-solid fa-arrow-up-from-bracket"></i>) > <strong>Add to Home Screen</strong>.</p>
+                </div>
+
+                <!-- Laptop / PC Guide -->
+                <div class="download-guide-box">
+                    <h4><i class="fa-solid fa-laptop"></i> For Laptop / Desktop</h4>
+                    <p>• <strong>Run App:</strong> Double-click the downloaded <code>AI-Calendar-Assistant.html</code> file on your computer.</p>
+                    <p>• <strong>Install Standalone:</strong> Click <strong>Install in Browser</strong> or the address bar install icon.</p>
+                    <p>• <strong>Windows Setup:</strong> Download the <code>.bat</code> setup to create a desktop shortcut.</p>
                 </div>
             </div>
 
             <div class="download-guide-actions">
+                <a href="/download/app" class="btn-entry-action btn-entry-app" id="btn-dialog-redownload-html" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
+                    <i class="fa-solid fa-download"></i> Download App (index.html)
+                </a>
                 <button class="btn-entry-action btn-entry-app" id="btn-dialog-install-native" style="display: none; width: auto; padding: 0.75rem 1.4rem;">
-                    <i class="fa-solid fa-arrow-down-to-bracket"></i> Install in Browser
+                    <i class="fa-solid fa-arrow-down-to-bracket"></i> Install in Browser / Mobile
                 </button>
-                <a href="/download/app" class="btn-entry-action btn-entry-web" id="btn-dialog-redownload" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
-                    <i class="fa-solid fa-download"></i> Download Laptop Setup (.bat)
+                <a href="/download/app?format=bat" class="btn-entry-action btn-entry-web" id="btn-dialog-redownload-bat" style="text-decoration: none; width: auto; padding: 0.75rem 1.4rem;">
+                    <i class="fa-solid fa-laptop"></i> Windows Setup (.bat)
                 </a>
                 <button class="btn-entry-action btn-entry-web" id="btn-dialog-done" style="width: auto; padding: 0.75rem 1.4rem;">
                     Done
@@ -764,11 +769,9 @@
         }
 
         function triggerDirectDownload() {
-            const isMac = /Macintosh|MacIntel|MacPPC|Mac68K/i.test(navigator.userAgent);
-            const downloadUrl = isMac ? '/download/app?format=shortcut' : '/download/app';
             const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.setAttribute('download', '');
+            link.href = '/download/app';
+            link.setAttribute('download', 'AI-Calendar-Assistant.html');
             document.body.appendChild(link);
             link.click();
             setTimeout(() => {
