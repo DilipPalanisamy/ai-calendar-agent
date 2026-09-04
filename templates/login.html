@@ -745,8 +745,23 @@
             }
         });
 
+        function isAppAlreadyInstalled() {
+            try {
+                if (window.matchMedia('(display-mode: standalone)').matches ||
+                    window.matchMedia('(display-mode: fullscreen)').matches ||
+                    window.matchMedia('(display-mode: minimal-ui)').matches) {
+                    return true;
+                }
+                if (window.navigator.standalone === true) return true;
+                if (localStorage.getItem('ai_calendar_app_installed') === 'true') return true;
+                if (window.location.search.includes('standalone=true') || (window.self !== window.top)) return true;
+            } catch (e) {}
+            return false;
+        }
+
         // First-time visitor modal check
         function checkFirstTimeVisitor() {
+            if (isAppAlreadyInstalled()) return;
             const hasSeen = localStorage.getItem('ai_calendar_app_prompt_seen');
             if (!hasSeen) {
                 const entryModal = document.getElementById('app-entry-modal-overlay');

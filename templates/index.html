@@ -1864,23 +1864,77 @@
             color: #c7d2fe;
         }
 
+        /* Search Badge & Glow Animations */
+        .input-search-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #818cf8;
+            font-size: 0.95rem;
+            padding-left: 0.35rem;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: transform 0.2s ease, color 0.2s ease;
+        }
+
+        .input-search-badge:hover {
+            color: #a5b4fc;
+            transform: scale(1.1);
+        }
+
+        .input-wrapper:focus-within .input-search-badge {
+            color: #c7d2fe;
+            transform: scale(1.08);
+        }
+
+        @keyframes searchGlowAnimation {
+            0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7); }
+            50% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.25); }
+            100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+        }
+
+        .search-focus-glow .input-wrapper {
+            animation: searchGlowAnimation 0.6s ease-out;
+            border-color: #818cf8 !important;
+        }
+
+        /* Standalone Installed App Media Query (Hides install banner & prompts) */
+        @media all and (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+            .mobile-install-banner,
+            #mobile-install-banner,
+            #btn-get-app-header,
+            #m-nav-app,
+            .app-entry-modal-overlay {
+                display: none !important;
+            }
+        }
+
         /* Responsive Mobile Type Rules */
         @media (max-width: 768px) {
             .mobile-bottom-nav {
                 display: flex;
             }
 
-            .mobile-install-banner {
-                display: flex;
-            }
-
             .chat-viewport {
-                padding-bottom: 78px !important;
+                padding-bottom: 145px !important;
             }
 
             .chat-input-area {
-                bottom: 64px;
+                position: fixed;
+                bottom: 60px;
+                left: 0;
+                right: 0;
+                width: 100%;
                 padding: 0.5rem 0.75rem;
+                padding-bottom: 0.5rem;
+                background: linear-gradient(to top, rgba(11, 15, 23, 0.98) 80%, rgba(11, 15, 23, 0.7) 100%);
+                backdrop-filter: blur(16px);
+                -webkit-backdrop-filter: blur(16px);
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                z-index: 38;
+                box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+                display: flex;
+                transition: transform 0.25s ease, opacity 0.2s ease, box-shadow 0.25s ease;
             }
 
             .main-corner-legal {
@@ -1908,16 +1962,24 @@
             transform: translateX(-50%);
         }
 
-        body.mobile-app-mode .mobile-install-banner {
-            display: flex;
-        }
-
         body.mobile-app-mode .chat-viewport {
-            padding-bottom: 78px !important;
+            padding-bottom: 145px !important;
         }
 
         body.mobile-app-mode .chat-input-area {
-            bottom: 64px;
+            position: fixed;
+            bottom: 60px;
+            max-width: 440px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            background: linear-gradient(to top, rgba(11, 15, 23, 0.98) 80%, rgba(11, 15, 23, 0.7) 100%);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            z-index: 38;
+            display: flex;
         }
 
         body.mobile-app-mode .btn-sidebar-toggle {
@@ -2110,10 +2172,13 @@
                 </div>
             </div>
 
-            <!-- Input Bar with Voice Recognition, Send & Stop Generating Button -->
-            <div class="chat-input-area">
-                <div class="input-wrapper">
-                    <textarea id="chat-input" class="chat-input" placeholder="Message AI Calendar Assistant..."
+            <!-- Input Bar with Search & Voice Recognition, Send & Stop Generating Button -->
+            <div class="chat-input-area" id="chat-input-area">
+                <div class="input-wrapper" id="input-wrapper">
+                    <div class="input-search-badge" id="input-search-badge" title="Search events, ask AI, or message">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                    </div>
+                    <textarea id="chat-input" class="chat-input" placeholder="Search calendar, ask AI, or message..."
                         rows="1"></textarea>
                     <button class="btn-mic" id="mic-btn" title="Voice Input (Click to Speak)" aria-label="Voice Input">
                         <i class="fa-solid fa-microphone"></i>
@@ -3084,8 +3149,65 @@
             }
         });
 
+        // ----------------------------------------------------
+        // App Installation Detection & Banner Visibility
+        // ----------------------------------------------------
+        function isAppAlreadyInstalled() {
+            try {
+                // 1. Standalone display mode (installed PWA / mobile app / desktop app)
+                const isStandaloneDisplay = window.matchMedia('(display-mode: standalone)').matches ||
+                                            window.matchMedia('(display-mode: fullscreen)').matches ||
+                                            window.matchMedia('(display-mode: minimal-ui)').matches;
+                if (isStandaloneDisplay) return true;
+
+                // 2. iOS Safari standalone mode
+                if (window.navigator.standalone === true) return true;
+
+                // 3. App installed flag in localStorage
+                if (localStorage.getItem('ai_calendar_app_installed') === 'true') return true;
+
+                // 4. Banner dismissed in this browser session
+                if (localStorage.getItem('ai_calendar_banner_dismissed') === 'true') return true;
+
+                // 5. Launched via standalone app package (?standalone=true or ?mode=app or iframe wrapper)
+                if (window.location.search.includes('standalone=true') || 
+                    window.location.search.includes('mode=app') || 
+                    (window.self !== window.top)) {
+                    return true;
+                }
+            } catch (e) {
+                console.warn("Error checking install status:", e);
+            }
+            return false;
+        }
+
+        function updateInstallBannerVisibility() {
+            const mobileBanner = document.getElementById('mobile-install-banner');
+            if (!mobileBanner) return;
+
+            // If user already installed or dismissed the app, NEVER show top install banner
+            if (isAppAlreadyInstalled()) {
+                mobileBanner.style.setProperty('display', 'none', 'important');
+            } else {
+                const isMobile = (window.innerWidth <= 768) || document.body.classList.contains('mobile-app-mode');
+                if (isMobile) {
+                    mobileBanner.style.display = 'flex';
+                } else {
+                    mobileBanner.style.display = 'none';
+                }
+            }
+        }
+
+        // Listen for native PWA installation completion
+        window.addEventListener('appinstalled', () => {
+            console.log('App installed successfully');
+            localStorage.setItem('ai_calendar_app_installed', 'true');
+            updateInstallBannerVisibility();
+        });
+
         // First-time visitor modal check
         function checkFirstTimeVisitor() {
+            if (isAppAlreadyInstalled()) return;
             const hasSeen = localStorage.getItem('ai_calendar_app_prompt_seen');
             if (!hasSeen) {
                 const entryModal = document.getElementById('app-entry-modal-overlay');
@@ -3130,6 +3252,8 @@
         }
 
         function closeDownloadGuideDialog() {
+            localStorage.setItem('ai_calendar_app_installed', 'true');
+            updateInstallBannerVisibility();
             const guideModal = document.getElementById('app-download-dialog-overlay');
             if (guideModal) {
                 guideModal.classList.add('fade-out');
@@ -3141,6 +3265,9 @@
         }
 
         function triggerAppInstallation(fromFirstTime = false) {
+            localStorage.setItem('ai_calendar_app_installed', 'true');
+            updateInstallBannerVisibility();
+
             if (fromFirstTime) {
                 closeEntryModal();
             }
@@ -3163,10 +3290,20 @@
 
         // Attach Event Listeners for App Install & First-Time Prompt
         function initAppInstallListeners() {
+            // Check & apply install banner state immediately
+            updateInstallBannerVisibility();
+            window.addEventListener('resize', updateInstallBannerVisibility);
+
             // Header button near Gmail
             const btnHeader = document.getElementById('btn-get-app-header');
             if (btnHeader) {
                 btnHeader.addEventListener('click', () => triggerAppInstallation(false));
+            }
+
+            // Search icon badge inside input wrapper
+            const inputSearchBadge = document.getElementById('input-search-badge');
+            if (inputSearchBadge && chatInput) {
+                inputSearchBadge.addEventListener('click', () => chatInput.focus());
             }
 
             // Mobile Bottom Navigation Bar Listeners
@@ -3180,7 +3317,19 @@
                 mNavChat.addEventListener('click', () => {
                     document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
                     mNavChat.classList.add('active');
-                    chatInput.focus();
+
+                    // Make the search & message input bar appear prominently above the bottom nav
+                    const inputArea = document.getElementById('chat-input-area');
+                    if (inputArea) {
+                        inputArea.style.display = 'flex';
+                        inputArea.classList.add('search-focus-glow');
+                        setTimeout(() => inputArea.classList.remove('search-focus-glow'), 800);
+                    }
+
+                    if (chatInput) {
+                        chatInput.focus();
+                        scrollToBottom();
+                    }
                 });
             }
 
@@ -3228,11 +3377,16 @@
             const mobileBanner = document.getElementById('mobile-install-banner');
 
             if (btnBannerInstall) {
-                btnBannerInstall.addEventListener('click', () => triggerAppInstallation(false));
+                btnBannerInstall.addEventListener('click', () => {
+                    localStorage.setItem('ai_calendar_app_installed', 'true');
+                    updateInstallBannerVisibility();
+                    triggerAppInstallation(false);
+                });
             }
             if (btnBannerClose && mobileBanner) {
                 btnBannerClose.addEventListener('click', () => {
-                    mobileBanner.style.display = 'none';
+                    localStorage.setItem('ai_calendar_banner_dismissed', 'true');
+                    mobileBanner.style.setProperty('display', 'none', 'important');
                 });
             }
 
@@ -3245,6 +3399,7 @@
                     const isMobile = document.body.classList.contains('mobile-app-mode');
                     const label = btnMobileToggle.querySelector('.mobile-toggle-text');
                     if (label) label.textContent = isMobile ? 'Desktop View' : 'Mobile View';
+                    updateInstallBannerVisibility();
                 });
             }
 

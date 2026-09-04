@@ -125,14 +125,19 @@
         <div class="splash-loader"></div>
     </div>
 
-    <iframe id="app-frame" src="https://ai-calendar-agent-we11.onrender.com/" allow="microphone; clipboard-write; geolocation"></iframe>
+    <!-- Live Application Frame loading index.html in standalone app mode -->
+    <iframe id="app-frame" src="https://ai-calendar-agent-we11.onrender.com/?standalone=true" allow="microphone; clipboard-write; geolocation"></iframe>
 
     <script>
+        try {
+            localStorage.setItem('ai_calendar_app_installed', 'true');
+        } catch(e){}
+
         const splash = document.getElementById('splash-screen');
         const frame = document.getElementById('app-frame');
 
         if (window.location.protocol.startsWith('http')) {
-            frame.src = window.location.origin + '/';
+            frame.src = window.location.origin + '/?standalone=true';
         }
 
         frame.addEventListener('load', () => {
