@@ -183,6 +183,34 @@
             box-shadow: 0 4px 14px var(--accent-glow);
         }
 
+        .btn-sidebar-install {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.2) 100%);
+            border: 1px solid rgba(139, 92, 246, 0.4);
+            color: #c7d2fe;
+            padding: 0.65rem 1rem;
+            min-height: var(--touch-target);
+            border-radius: var(--radius-md);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.86rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-top: 0.5rem;
+        }
+
+        .btn-sidebar-install:hover,
+        .btn-sidebar-install:active {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border-color: transparent;
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+        }
+
         .history-section-header {
             padding: 0.85rem 1rem 0.35rem;
             display: flex;
@@ -1332,6 +1360,67 @@
             flex-shrink: 0;
         }
 
+        .btn-install-app-header {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(139, 92, 246, 0.22) 100%);
+            border: 1px solid rgba(139, 92, 246, 0.45);
+            color: #c7d2fe;
+            padding: 6px 14px;
+            min-height: 38px;
+            border-radius: 20px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.15);
+            white-space: nowrap;
+        }
+
+        .btn-install-app-header:hover {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border-color: transparent;
+            color: #ffffff;
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.45);
+            transform: translateY(-1px);
+        }
+
+        .btn-install-app-header:active {
+            transform: translateY(1px);
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-install-app-header i {
+            font-size: 0.88rem;
+            color: #a5b4fc;
+            transition: color 0.2s ease;
+        }
+
+        .btn-install-app-header:hover i {
+            color: #ffffff;
+        }
+
+        @media (max-width: 580px) {
+            .btn-install-app-header {
+                padding: 6px 10px;
+                font-size: 0.78rem;
+            }
+        }
+
+        /* Standalone Installed App Media Query (Hides install buttons when already running as app) */
+        @media all and (display-mode: standalone),
+        (display-mode: fullscreen),
+        (display-mode: minimal-ui) {
+            #btn-install-app-header,
+            #btn-sidebar-install {
+                display: none !important;
+            }
+        }
+
         /* Mobile Install Sheet Overlay (iOS / Fallback mobile instructions) */
         .mobile-install-sheet-overlay {
             position: fixed;
@@ -1592,6 +1681,9 @@
                 <button class="btn-new-chat" id="new-chat-btn">
                     <i class="fa-solid fa-plus"></i> New Chat
                 </button>
+                <button class="btn-sidebar-install" id="btn-sidebar-install" title="Install App on Device">
+                    <i class="fa-solid fa-mobile-screen-button"></i> Install App
+                </button>
             </div>
 
             <div class="history-section-header">
@@ -1649,8 +1741,13 @@
                     <h2 class="chat-header-title" id="current-chat-title">AI Assistant</h2>
                 </div>
 
-                <!-- Right Header Actions (Multi-Account Switcher) -->
+                <!-- Right Header Actions (Install App Button & Multi-Account Switcher) -->
                 <div class="chat-header-actions">
+                    <button class="btn-install-app-header" id="btn-install-app-header"
+                        title="Install AI Calendar Assistant on this device">
+                        <i class="fa-solid fa-mobile-screen-button"></i>
+                        <span class="install-app-btn-text">Install App</span>
+                    </button>
 
                     <!-- Multi-Account Switcher Dropdown -->
                     <div class="account-switcher-box" id="account-switcher-box">
@@ -2781,6 +2878,19 @@
                 inputSearchBadge.addEventListener('click', () => chatInput.focus());
             }
 
+            // Install App Buttons (Header & Sidebar)
+            const btnInstallHeader = document.getElementById('btn-install-app-header');
+            if (btnInstallHeader) {
+                btnInstallHeader.addEventListener('click', () => installOnMobileDevice());
+            }
+
+            const btnInstallSidebar = document.getElementById('btn-sidebar-install');
+            if (btnInstallSidebar) {
+                btnInstallSidebar.addEventListener('click', () => {
+                    closeSidebar();
+                    installOnMobileDevice();
+                });
+            }
 
             // Mobile Install Sheet Dismiss Listeners
             const sheetCloseBtn = document.getElementById('sheet-close-btn');
