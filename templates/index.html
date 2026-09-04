@@ -2372,13 +2372,8 @@
                 if (res.ok) {
                     activeAccountEmail = email;
                     await loadAccounts();
-                    activeSessionId = null;
-                    currentSessionMessages = [];
-                    const restored = restoreCachedChatIfAvailable();
-                    if (!restored) {
-                        startNewChat();
-                    }
-                    await loadHistory(true);
+                    startNewChat();
+                    await loadHistory(false);
                 }
             } catch (err) {
                 console.error("Failed switching account:", err);
@@ -2403,7 +2398,8 @@
                 }
 
                 await loadAccounts();
-                await loadHistory(true);
+                startNewChat();
+                await loadHistory(false);
             } catch (err) {
                 console.error("Failed removing account:", err);
             }
@@ -2412,7 +2408,7 @@
         // ----------------------------------------------------
         // Chat History API Management
         // ----------------------------------------------------
-        async function loadHistory(autoSelect = true) {
+        async function loadHistory(autoSelect = false) {
             try {
                 const res = await fetch('/api/history');
                 if (!res.ok) return;
@@ -2575,11 +2571,9 @@
                 const res = await fetch(`/api/history/${sessionId}`, { method: 'DELETE' });
                 if (res.ok) {
                     if (activeSessionId === sessionId) {
-                        clearSessionCache();
-                        activeSessionId = null;
-                        currentSessionMessages = [];
+                        startNewChat();
                     }
-                    await loadHistory(true);
+                    await loadHistory(false);
                     showNotification("🗑️ Chat conversation deleted.");
                 }
             } catch (err) {
@@ -3061,11 +3055,11 @@
             }
         }
 
-        // Initialize on Page Load
+        // Initialize on Page Load - Always start dashboard from New Chat
         document.addEventListener('DOMContentLoaded', () => {
-            restoreCachedChatIfAvailable();
             loadAccounts();
-            loadHistory(true);
+            startNewChat();
+            loadHistory(false);
             chatInput.focus();
             initAppInstallListeners();
         });
