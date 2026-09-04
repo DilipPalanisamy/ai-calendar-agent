@@ -1368,8 +1368,15 @@
         }
 
         @keyframes sheetSlideUp {
-            from { transform: translateY(30px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
+            from {
+                transform: translateY(30px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
         }
 
         .sheet-close-btn {
@@ -1626,9 +1633,17 @@
         }
 
         @keyframes searchGlowAnimation {
-            0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7); }
-            50% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.25); }
-            100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+            0% {
+                box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7);
+            }
+
+            50% {
+                box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.25);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+            }
         }
 
         .search-focus-glow .input-wrapper {
@@ -1637,7 +1652,9 @@
         }
 
         /* Standalone Installed App Media Query (Hides install button when already running as app) */
-        @media all and (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+        @media all and (display-mode: standalone),
+        (display-mode: fullscreen),
+        (display-mode: minimal-ui) {
             #m-nav-app {
                 display: none !important;
             }
@@ -1882,10 +1899,10 @@
             <!-- Input Bar with Search & Voice Recognition, Send & Stop Generating Button -->
             <div class="chat-input-area" id="chat-input-area">
                 <div class="input-wrapper" id="input-wrapper">
-                    <div class="input-search-badge" id="input-search-badge" title="Search events, ask AI, or message">
+                    <div class="input-search-badge" id="input-search-badge" title="Search events or message">
                         <i class="fa-solid fa-magnifying-glass"></i>
                     </div>
-                    <textarea id="chat-input" class="chat-input" placeholder="Search calendar, ask AI, or message..."
+                    <textarea id="chat-input" class="chat-input" placeholder="Search calendar or message..."
                         rows="1"></textarea>
                     <button class="btn-mic" id="mic-btn" title="Voice Input (Click to Speak)" aria-label="Voice Input">
                         <i class="fa-solid fa-microphone"></i>
@@ -2857,8 +2874,8 @@
             try {
                 // 1. Standalone display mode (installed PWA / mobile app / desktop app)
                 const isStandaloneDisplay = window.matchMedia('(display-mode: standalone)').matches ||
-                                            window.matchMedia('(display-mode: fullscreen)').matches ||
-                                            window.matchMedia('(display-mode: minimal-ui)').matches;
+                    window.matchMedia('(display-mode: fullscreen)').matches ||
+                    window.matchMedia('(display-mode: minimal-ui)').matches;
                 if (isStandaloneDisplay) return true;
 
                 // 2. iOS Safari standalone mode
@@ -2871,8 +2888,8 @@
                 if (localStorage.getItem('ai_calendar_banner_dismissed') === 'true') return true;
 
                 // 5. Launched via standalone app package (?standalone=true or ?mode=app or iframe wrapper)
-                if (window.location.search.includes('standalone=true') || 
-                    window.location.search.includes('mode=app') || 
+                if (window.location.search.includes('standalone=true') ||
+                    window.location.search.includes('mode=app') ||
                     (window.self !== window.top)) {
                     return true;
                 }
@@ -3075,15 +3092,18 @@
                 <i class="fa-solid fa-mobile-screen-button"></i>
             </div>
             <h3 class="sheet-title">Install on Mobile</h3>
-            <p class="sheet-desc">Install AI Calendar Assistant directly to your home screen for fast one-tap access.</p>
+            <p class="sheet-desc">Install AI Calendar Assistant directly to your home screen for fast one-tap access.
+            </p>
             <div class="sheet-steps" id="sheet-steps">
                 <div class="sheet-step-item">
                     <div class="sheet-step-num">1</div>
-                    <div class="sheet-step-text" id="sheet-step-1">Tap the <strong>Share</strong> button <i class="fa-solid fa-arrow-up-from-bracket"></i> in the Safari toolbar.</div>
+                    <div class="sheet-step-text" id="sheet-step-1">Tap the <strong>Share</strong> button <i
+                            class="fa-solid fa-arrow-up-from-bracket"></i> in the Safari toolbar.</div>
                 </div>
                 <div class="sheet-step-item">
                     <div class="sheet-step-num">2</div>
-                    <div class="sheet-step-text" id="sheet-step-2">Select <strong>Add to Home Screen</strong> <i class="fa-solid fa-square-plus"></i>.</div>
+                    <div class="sheet-step-text" id="sheet-step-2">Select <strong>Add to Home Screen</strong> <i
+                            class="fa-solid fa-square-plus"></i>.</div>
                 </div>
             </div>
             <button class="btn-sheet-done" id="btn-sheet-done">Got it</button>
